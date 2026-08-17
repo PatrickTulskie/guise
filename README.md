@@ -40,10 +40,28 @@ Apps → mode Always), or the first push will be rejected.
 What happens: the App's metadata (slug, installation ID, bot user ID) is
 discovered from the API, credentials go into 1Password, the PEM is shredded,
 helper binaries land in `~/.local/bin`, and a directory-scoped git identity is
-wired up for `~/agentic-code/default/`. It finishes by running `doctor`, which
-verifies the whole chain. Safe to re-run any time.
+wired up for `~/agentic-code/default/`. Setup also drops an `AGENTS.md` (and a
+`CLAUDE.md` importing it) into `~/agentic-code/` telling harnesses to use
+`agent-gh` — harnesses that stack context files up the directory tree pick it
+up for every repo underneath; it never overwrites your edits. It finishes by
+running `doctor`, which verifies the whole chain. Safe to re-run any time.
 
-Requires: `op` (1Password CLI, signed in), `gh`, `jq`, `openssl`, `git`.
+Requires: `gh`, `jq`, `openssl`, `git`, and `op` (1Password CLI, signed in)
+unless you use `--store file`.
+
+### Key storage: 1Password or a plain file
+
+By default the private key lives in 1Password and is read on demand, which
+means a locked vault blocks token minting. For agents that run unattended,
+pass `--store file` and the key is kept at `~/.config/agent-id/keys/<identity>.pem`
+(mode 600) instead — no 1Password involved at mint time. The key deliberately
+does *not* live in `~/agentic-code/`: agents roam that directory and must not
+be able to read or accidentally commit it.
+
+### The PEM is only needed once per app
+
+Adding another identity for an app you've already set up (a second
+installation, say) reuses the stored key — just omit `--pem`.
 
 ## Daily use
 
@@ -68,15 +86,22 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `agent-id doctor` | verify everything; non-zero exit on any failure |
 | `agent-id clone <owner/repo>` | clone where the identity applies |
 | `agent-id token` | print an installation token (debugging / harness use) |
-| `agent-id uninstall` | remove all wiring; 1Password items and clones are left alone |
+| `agent-id uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
 
 ## Multiple identities
 
-Each identity (one GitHub App each) gets its own subdirectory:
+Each identity gets its own subdirectory. A second installation of the *same*
+app (e.g. on an org you belong to) needs no new key:
+
+```bash
+agent-id setup --owner some-org --app-id 12345 --name someorg
+agent-id clone some-org/their-repo --name someorg   # → ~/agentic-code/someorg/
+```
+
+A different app entirely gets its own `--pem`:
 
 ```bash
 agent-id setup --owner patricktulskie --app-id 67890 --pem ~/Downloads/other.pem --name experiments
-agent-id clone patricktulskie/some-repo --name experiments   # → ~/agentic-code/experiments/
 ```
 
 ## Contributing to repos the app isn't installed on

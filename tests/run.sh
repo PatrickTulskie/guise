@@ -23,7 +23,7 @@ new_sandbox() {
   export OP_FAKE_DIR="$SB/op"; mkdir -p "$OP_FAKE_DIR"
   export CURL_LOG="$SB/curl.log"; : > "$CURL_LOG"
   export PATH="$ROOT/tests/stubs:$REAL_PATH"
-  export FAKE_APP_ID=1111 FAKE_SLUG=test-agent FAKE_OWNER=patricktulskie FAKE_INSTALL_ID=2222 FAKE_BOT_ID=3333
+  export FAKE_APP_ID=1111 FAKE_SLUG=test-agent FAKE_OWNER=PatrickTulskie FAKE_INSTALL_ID=2222 FAKE_BOT_ID=3333
   export OP_FAKE_ACCOUNT=my.1password.com
   unset AGENT_ID_IDENTITY AGENT_ID_CONFIG AGENT_ID_CO_AUTHOR 2>/dev/null || true
   git config --global user.name "Human"
@@ -69,17 +69,22 @@ expect "credential helper installed" test -x "$HOME/.local/bin/agent-id-credenti
 expect "agent-gh installed" test -x "$HOME/.local/bin/agent-gh"
 expect "hook installed" test -x "$HOME/.config/agent-id/git/agent-hooks/prepare-commit-msg"
 expect "identity dir created" test -d "$HOME/agentic-code/default"
+expect "AGENTS.md dropped in workspace" test -f "$HOME/agentic-code/AGENTS.md"
+expect "CLAUDE.md imports AGENTS.md" grep -q '@AGENTS.md' "$HOME/agentic-code/CLAUDE.md"
 expect_eq "exactly one marker block in ~/.gitconfig" \
   "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
 
 # --- idempotency -------------------------------------------------------------
 echo "idempotency:"
 snap1=$(snapshot)
+echo "custom rules" > "$HOME/agentic-code/AGENTS.md"
 run_setup >/dev/null 2>&1
 expect_eq "re-run without --pem exits 0" "$?" "0"
 expect_eq "re-run changes no artifact" "$(snapshot)" "$snap1"
 expect_eq "still exactly one marker block" \
   "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+expect_eq "edited AGENTS.md not overwritten" \
+  "$(cat "$HOME/agentic-code/AGENTS.md")" "custom rules"
 
 # --- second identity ---------------------------------------------------------
 echo "multiple identities:"
@@ -91,6 +96,9 @@ expect_eq "two includeIf blocks in owned gitconfig" \
 expect_eq "~/.gitconfig untouched by second identity" \
   "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
 expect "platform dir created" test -d "$HOME/agentic-code/platform"
+run_setup --name reused >/dev/null 2>&1
+expect_eq "new identity without --pem reuses the stored key" "$?" "0"
+expect_eq "reused identity fully discovered" "$(cfg identity.reused.installationid)" "2222"
 
 # --- identity applies inside scope, hook behaves -----------------------------
 echo "scoped identity + trailer hook:"
@@ -123,6 +131,30 @@ expect_eq "only one mint against the API" "$(grep -c access_tokens "$CURL_LOG")"
 echo "doctor:"
 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
 expect_eq "doctor passes on a healthy install" "$?" "0"
+
+# --- file key store ----------------------------------------------------------
+echo "file key store:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+expect_eq "file-store setup exits 0" "$?" "0"
+keyfile="$HOME/.config/agent-id/keys/default.pem"
+expect "key file written" test -f "$keyfile"
+expect_eq "key file mode 600" \
+  "$(stat -f '%Lp' "$keyfile" 2>/dev/null || stat -c '%a' "$keyfile")" "600"
+expect_eq "keysource recorded" "$(cfg identity.default.keysource)" "file"
+expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/test-agent"
+expect "PEM shredded after storing" test ! -e "$SB/key.pem"
+t=$("$HOME/.local/bin/agent-id-token" default)
+expect_eq "token mints from file key" "${t:0:4}" "ghs_"
+run_setup --store file --name second >/dev/null 2>&1
+expect_eq "second file identity reuses key without --pem" "$?" "0"
+expect "second identity got its own key file" test -f "$HOME/.config/agent-id/keys/second.pem"
+"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+expect_eq "doctor passes with file store" "$?" "0"
+"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+expect "uninstall keeps key files" test -f "$keyfile"
+expect "uninstall removes config file" test ! -e "$HOME/.config/agent-id/config"
+expect "uninstall removes rendered git dir" test ! -e "$HOME/.config/agent-id/git"
 
 # --- uninstall restores prior state ------------------------------------------
 echo "uninstall:"

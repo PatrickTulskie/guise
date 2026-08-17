@@ -15,6 +15,7 @@ CONFIG_FILE="$CONFIG_DIR/config"
 OWNED_GITCONFIG="$CONFIG_DIR/gitconfig"
 RENDER_DIR="$CONFIG_DIR/git"
 HOOKS_DIR="$RENDER_DIR/agent-hooks"
+KEYS_DIR="$CONFIG_DIR/keys"
 BIN_DIR="$HOME/.local/bin"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
 DEFAULT_BASEDIR="$HOME/agentic-code"
@@ -45,6 +46,28 @@ list_identities() {
 }
 
 basedir() { cfg_get core.basedir || printf '%s' "$DEFAULT_BASEDIR"; }
+
+key_source() { cfg_get "identity.$1.keysource" || printf 'op'; }
+
+read_identity_key() { # name -> PEM on stdout
+  local acct item
+  if [[ "$(key_source "$1")" == "file" ]]; then
+    cat "$(cfg_get "identity.$1.keyfile")"
+  else
+    item=$(cfg_get "identity.$1.opitem") || return 1
+    acct=$(cfg_get "identity.$1.opaccount") || acct=""
+    if [[ -n "$acct" ]]; then op --account "$acct" read "$item/private_key"
+    else op read "$item/private_key"; fi
+  fi
+}
+
+find_identity_by_appid() { # app_id -> identity name
+  local n
+  for n in $(list_identities); do
+    if [[ "$(cfg_get "identity.$n.appid")" == "$1" ]]; then printf '%s' "$n"; return 0; fi
+  done
+  return 1
+}
 
 ask() { # varname "prompt" [default]
   local _var="$1" _prompt="$2" _def="${3:-}" _val=""
@@ -81,13 +104,11 @@ IDENTITY="${1:-${AGENT_ID_IDENTITY:-default}}"
 die() { printf 'agent-id-token: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$CONFIG" ]] || die "no config at $CONFIG -- run 'agent-id setup' first"
-OP_ITEM=$(git config -f "$CONFIG" --get "identity.$IDENTITY.opitem" 2>/dev/null) \
+cfg() { git config -f "$CONFIG" --get "identity.$IDENTITY.$1" 2>/dev/null; }
+APP_ID=$(cfg appid) \
   || die "identity '$IDENTITY' not in config -- run 'agent-id setup --name $IDENTITY'"
-OP_ACCOUNT=$(git config -f "$CONFIG" --get "identity.$IDENTITY.opaccount" 2>/dev/null || true)
-
-op_read() {
-  if [[ -n "$OP_ACCOUNT" ]]; then op --account "$OP_ACCOUNT" read "$1"; else op read "$1"; fi
-}
+INSTALL_ID=$(cfg installationid) \
+  || die "identity '$IDENTITY' has no installation id -- re-run 'agent-id setup'"
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
 mkdir -p "$CACHE_DIR"; chmod 700 "$CACHE_DIR"
@@ -105,23 +126,38 @@ fi
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
+# Key source is per-identity config: "file" reads a local PEM (no 1Password
+# involved, suits unattended runs), anything else reads 1Password.
+KEY_SOURCE=$(cfg keysource) || KEY_SOURCE="op"
+case "$KEY_SOURCE" in
+  file)
+    KEY_FILE=$(cfg keyfile) && [[ -f "$KEY_FILE" ]] \
+      || die "key file missing for identity '$IDENTITY' -- re-run 'agent-id setup' with --pem"
+    read_key() { cat "$KEY_FILE"; }
+    ;;
+  *)
+    OP_ITEM=$(cfg opitem) \
+      || die "no 1Password item in config for '$IDENTITY' -- re-run 'agent-id setup'"
+    OP_ACCOUNT=$(cfg opaccount) || OP_ACCOUNT=""
+    read_key() {
+      if [[ -n "$OP_ACCOUNT" ]]; then op --account "$OP_ACCOUNT" read "$OP_ITEM/private_key"
+      else op read "$OP_ITEM/private_key"; fi
+    }
+    ;;
+esac
+
 # Token acquisition lives in this one function so an alternate source
 # (e.g. a remote token service) is a single-body swap.
 mint_token() {
-  local app_id install_id now header payload signature jwt
-  app_id=$(op_read "$OP_ITEM/app_id") \
-    || die "op read failed -- 1Password locked, or item missing ($OP_ITEM)"
-  install_id=$(op_read "$OP_ITEM/installation_id") \
-    || die "op read failed for installation_id ($OP_ITEM)"
-
+  local now header payload signature jwt
   now=$(date +%s)
   header=$(printf '{"typ":"JWT","alg":"RS256"}' | b64url)
   # iat backdated 60s for clock skew; GitHub rejects exp > 10 min out
-  payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$app_id" | b64url)
+  payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)
 
-  # PEM reaches openssl via process substitution -- never written to disk.
+  # PEM reaches openssl via process substitution -- never leaves its store.
   signature=$(printf '%s.%s' "$header" "$payload" \
-    | openssl dgst -sha256 -sign <(op_read "$OP_ITEM/private_key") -binary \
+    | openssl dgst -sha256 -sign <(read_key) -binary \
     | b64url)
   jwt="${header}.${payload}.${signature}"
 
@@ -129,8 +165,8 @@ mint_token() {
     -H "Authorization: Bearer ${jwt}" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${AGENT_ID_GITHUB_API:-https://api.github.com}/app/installations/${install_id}/access_tokens" \
-    || die "failed to mint installation token -- check app id, installation id, PEM validity, app still installed"
+    "${AGENT_ID_GITHUB_API:-https://api.github.com}/app/installations/${INSTALL_ID}/access_tokens" \
+    || die "failed to mint installation token -- key unreadable (1Password locked / file gone), stale ids, or app uninstalled"
 }
 
 mint_unix=$(date +%s)
@@ -288,6 +324,31 @@ install_hook() {
   chmod 755 "$HOOKS_DIR/prepare-commit-msg"
 }
 
+# Harness instructions at the top of the agent workspace. Claude Code (and
+# other harnesses that stack context files up the directory tree) pick these
+# up for every repo underneath. Never overwrites user edits.
+install_agent_docs() { # basedir
+  local base="$1"
+  if [[ ! -e "$base/AGENTS.md" ]]; then
+    cat > "$base/AGENTS.md" <<'EOF'
+# Agent workspace
+
+Repos under this directory use a dedicated GitHub App bot identity, wired up
+by `agent-id`. Commits here are authored by the bot automatically.
+
+- Use `agent-gh` instead of `gh` for every GitHub CLI operation (PRs, issues,
+  API calls). Plain `gh` acts as the human's account.
+- Clone with `agent-id clone <owner/repo>` or an https URL; never ssh remotes
+  (ssh authenticates as the human).
+- Do not change git identity settings (user.name, user.email, credential
+  helpers, signing) -- the directory-scoped config handles all of that.
+EOF
+  fi
+  if [[ ! -e "$base/CLAUDE.md" ]]; then
+    printf '@AGENTS.md\n' > "$base/CLAUDE.md"
+  fi
+}
+
 render_identity_conf() { # name
   local name="$1" slug bot tmpl
   slug=$(cfg_get "identity.$name.slug") || die "identity '$name' missing slug"
@@ -358,13 +419,14 @@ remove_include_block() {
 # ---------------------------------------------------------------------------
 
 cmd_setup() {
-  local owner="" app_id="" pem="" name="default" vault="Private" coauthor="" base="" op_account=""
+  local owner="" app_id="" pem="" name="default" vault="Private" coauthor="" base="" op_account="" store="op"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --owner)      owner="$2"; shift 2 ;;
       --app-id)     app_id="$2"; shift 2 ;;
       --pem)        pem="$2"; shift 2 ;;
       --name)       name="$2"; shift 2 ;;
+      --store)      store="$2"; shift 2 ;;
       --vault)      vault="$2"; shift 2 ;;
       --op-account) op_account="$2"; shift 2 ;;
       --coauthor)   coauthor="$2"; shift 2 ;;
@@ -379,15 +441,19 @@ cmd_setup() {
 
   local name_re='^[A-Za-z0-9_-]+$'
   [[ "$name" =~ $name_re ]] || die "identity name must match [A-Za-z0-9_-]+: '$name'"
+  [[ "$store" == "op" || "$store" == "file" ]] || die "--store must be 'op' or 'file', got '$store'"
 
   local dep
-  for dep in op gh jq openssl git curl; do
+  for dep in gh jq openssl git curl; do
     command -v "$dep" >/dev/null || die "missing dependency: $dep"
   done
-  # Not `op whoami`: it reports session-token state and fails under the
-  # desktop app's biometric integration even when real operations work.
-  op_do vault get "$vault" >/dev/null 2>&1 \
-    || die "1Password vault '$vault' unreachable -- not signed in (op signin / enable CLI integration) or the vault doesn't exist"
+  if [[ "$store" == "op" ]]; then
+    command -v op >/dev/null || die "missing dependency: op (or use --store file to keep the key on disk)"
+    # Not `op whoami`: it reports session-token state and fails under the
+    # desktop app's biometric integration even when real operations work.
+    op_do vault get "$vault" >/dev/null 2>&1 \
+      || die "1Password vault '$vault' unreachable -- not signed in (op signin / enable CLI integration) or the vault doesn't exist"
+  fi
 
   [[ -n "$owner" ]]  || ask owner "GitHub account (user or org) the app is installed on"
   [[ -n "$app_id" ]] || ask app_id "App ID (top of the app settings page)"
@@ -402,13 +468,25 @@ cmd_setup() {
     coauthor=$(cfg_get core.coauthor) || true
   fi
 
-  # PEM source: a fresh download, or the key already stored in 1Password.
-  local op_item="op://$vault/"
-  local item_title="" pem_source=""
+  # Key material: a freshly downloaded PEM, or a key already stored for this
+  # identity -- or for ANY identity using the same app, so adding a second
+  # installation of one app never needs a new key download.
+  local key_material="" pem_source="" key_owner=""
   if [[ -n "$pem" ]]; then
     [[ -f "$pem" ]] || die "PEM not found at $pem"
     openssl pkey -in "$pem" -noout 2>/dev/null || die "$pem is not a valid private key"
+    key_material=$(cat "$pem")
     pem_source="file"
+  else
+    if [[ "$(cfg_get "identity.$name.appid")" == "$app_id" ]]; then
+      key_owner="$name"
+    else
+      key_owner=$(find_identity_by_appid "$app_id") || true
+    fi
+    [[ -n "$key_owner" ]] \
+      || die "no --pem given and no stored key for app $app_id -- pass --pem <downloaded .pem>"
+    key_material=$(read_identity_key "$key_owner") \
+      || die "could not read stored key of identity '$key_owner' -- pass --pem to store a fresh one"
   fi
 
   # --- discover slug, installation id, bot user id -------------------------
@@ -417,17 +495,8 @@ cmd_setup() {
   now=$(date +%s)
   header=$(printf '{"typ":"JWT","alg":"RS256"}' | b64url)
   payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$app_id" | b64url)
-  if [[ "$pem_source" == "file" ]]; then
-    signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$pem" -binary | b64url)
-  else
-    # No fresh PEM: re-run against the key already in 1Password.
-    local existing_item
-    existing_item=$(cfg_get "identity.$name.opitem") \
-      || die "no --pem given and identity '$name' not previously set up -- pass --pem <downloaded .pem>"
-    signature=$(printf '%s.%s' "$header" "$payload" \
-      | openssl dgst -sha256 -sign <(op_do read "$existing_item/private_key") -binary | b64url) \
-      || die "could not read private key from $existing_item -- pass --pem to store a fresh one"
-  fi
+  signature=$(printf '%s.%s' "$header" "$payload" \
+    | openssl dgst -sha256 -sign <(printf '%s\n' "$key_material") -binary | b64url)
   jwt="${header}.${payload}.${signature}"
 
   api() {
@@ -446,7 +515,8 @@ cmd_setup() {
 
   local installs install_id
   installs=$(api "/app/installations?per_page=100") || die "could not list installations for the app"
-  install_id=$(printf '%s' "$installs" | jq -r --arg owner "$owner" '.[] | select(.account.login == $owner) | .id')
+  install_id=$(printf '%s' "$installs" | jq -r --arg owner "$owner" \
+    '.[] | select((.account.login | ascii_downcase) == ($owner | ascii_downcase)) | .id')
   [[ -n "$install_id" && "$install_id" != "null" ]] \
     || die "app '$slug' is not installed on '$owner' -- do the install step (see README)"
   say "    installation id: $install_id"
@@ -457,43 +527,46 @@ cmd_setup() {
   [[ "$bot_user_id" != "$app_id" ]] || die "bot user id equals app id ($app_id) -- that can't be right, refusing"
   say "    bot user id: $bot_user_id (this goes in the commit email, NOT the app id)"
 
-  # --- store credentials in 1Password, shred the PEM ------------------------
-  item_title="$slug"
-  op_item="op://$vault/$item_title"
-  say "==> storing credentials in 1Password ($op_item)"
-  if op_do item get "$item_title" --vault "$vault" >/dev/null 2>&1; then
-    if [[ "$pem_source" == "file" ]]; then
-      op_do item edit "$item_title" --vault "$vault" \
+  # --- store the key (1Password or key file), shred the PEM -----------------
+  mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
+  local op_item="" keyfile=""
+  if [[ "$store" == "op" ]]; then
+    op_item="op://$vault/$slug"
+    say "==> storing credentials in 1Password ($op_item)"
+    if op_do item get "$slug" --vault "$vault" >/dev/null 2>&1; then
+      op_do item edit "$slug" --vault "$vault" \
         "app_id[text]=$app_id" \
         "installation_id[text]=$install_id" \
-        "private_key[concealed]=$(cat "$pem")" >/dev/null
+        "private_key[concealed]=$key_material" >/dev/null
     else
-      op_do item edit "$item_title" --vault "$vault" \
+      op_do item create --category "API Credential" --title "$slug" --vault "$vault" \
         "app_id[text]=$app_id" \
-        "installation_id[text]=$install_id" >/dev/null
+        "installation_id[text]=$install_id" \
+        "private_key[concealed]=$key_material" >/dev/null
     fi
+    [[ "$(op_do read "$op_item/app_id")" == "$app_id" ]] || die "1Password readback failed for $op_item/app_id"
   else
-    [[ "$pem_source" == "file" ]] || die "1Password item '$item_title' doesn't exist and no --pem given"
-    op_do item create --category "API Credential" --title "$item_title" --vault "$vault" \
-      "app_id[text]=$app_id" \
-      "installation_id[text]=$install_id" \
-      "private_key[concealed]=$(cat "$pem")" >/dev/null
+    # Deliberately under ~/.config, NOT the agent workspace -- agents roam
+    # the workspace and must not be able to read or commit the key.
+    keyfile="$KEYS_DIR/$name.pem"
+    say "==> storing private key at $keyfile"
+    mkdir -p "$KEYS_DIR"; chmod 700 "$KEYS_DIR"
+    printf '%s\n' "$key_material" > "$keyfile"
+    chmod 600 "$keyfile"
   fi
-  [[ "$(op_do read "$op_item/app_id")" == "$app_id" ]] || die "1Password readback failed for $op_item/app_id"
 
-  if [[ "$pem_source" == "file" ]]; then
+  if [[ "$pem_source" == "file" && ! "$pem" -ef "$keyfile" ]]; then
     if command -v shred >/dev/null; then
       shred -u "$pem"
     else
       rm -f "$pem"
       warn "shred not available -- PEM removed with rm (contents may persist on disk)"
     fi
-    say "    PEM stored and local file shredded"
+    say "    key stored and downloaded PEM shredded"
   fi
 
   # --- write config + render everything -------------------------------------
   say "==> writing config and git wiring"
-  mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
   touch "$CONFIG_FILE"; chmod 600 "$CONFIG_FILE"
   cfg_set core.basedir "$base"
   if [[ -n "$coauthor" ]]; then
@@ -507,7 +580,14 @@ cmd_setup() {
   cfg_set "identity.$name.slug" "$slug"
   cfg_set "identity.$name.installationid" "$install_id"
   cfg_set "identity.$name.botuserid" "$bot_user_id"
-  cfg_set "identity.$name.opitem" "$op_item"
+  cfg_set "identity.$name.keysource" "$store"
+  if [[ "$store" == "op" ]]; then
+    cfg_set "identity.$name.opitem" "$op_item"
+    git config -f "$CONFIG_FILE" --unset "identity.$name.keyfile" 2>/dev/null || true
+  else
+    cfg_set "identity.$name.keyfile" "$keyfile"
+    git config -f "$CONFIG_FILE" --unset "identity.$name.opitem" 2>/dev/null || true
+  fi
 
   install_binaries
   install_hook
@@ -515,6 +595,7 @@ cmd_setup() {
   regen_owned_gitconfig
   ensure_include_block
   mkdir -p "$base/$name"
+  install_agent_docs "$base"
 
   say "==> setup complete for identity '$name'"
   say "    agent clones go in $base/$name/ (use 'agent-id clone <owner/repo>')"
@@ -544,15 +625,24 @@ expected_email() { # name
     "$(cfg_get "identity.$1.botuserid")" "$(cfg_get "identity.$1.slug")"
 }
 
-chk_deps() { local c; for c in op gh jq openssl git curl; do command -v "$c" >/dev/null || return 1; done; }
+chk_deps() { local c; for c in gh jq openssl git curl; do command -v "$c" >/dev/null || return 1; done; }
 chk_op() {
   local acct
+  command -v op >/dev/null || return 1
   acct=$(cfg_get "identity.$1.opaccount") || acct=""
   if [[ -n "$acct" ]]; then
-    op --account "$acct" read "$(cfg_get "identity.$1.opitem")/app_id" >/dev/null
+    op --account "$acct" read "$(cfg_get "identity.$1.opitem")/private_key" >/dev/null
   else
-    op read "$(cfg_get "identity.$1.opitem")/app_id" >/dev/null
+    op read "$(cfg_get "identity.$1.opitem")/private_key" >/dev/null
   fi
+}
+chk_keyfile() {
+  local f mode
+  f=$(cfg_get "identity.$1.keyfile") || return 1
+  [[ -f "$f" ]] || return 1
+  mode=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
+  [[ "$mode" == "600" ]] || return 1
+  openssl pkey -in "$f" -noout 2>/dev/null
 }
 chk_token() { local t re='^ghs_'; t=$("$BIN_DIR/agent-id-token" "$1"); [[ "$t" =~ $re ]]; }
 chk_cache() {
@@ -618,7 +708,7 @@ cmd_doctor() {
   [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
 
   say "doctor:"
-  check "dependencies present (op gh jq openssl git curl)" \
+  check "dependencies present (gh jq openssl git curl)" \
         "brew install the missing one" chk_deps
   check "helper binaries installed in $BIN_DIR" \
         "re-run 'agent-id setup'" chk_binaries
@@ -635,8 +725,13 @@ cmd_doctor() {
   for name in $names; do
     say ""
     say "identity '$name' ($(cfg_get "identity.$name.slug") on $(cfg_get "identity.$name.owner")):"
-    check "1Password item reachable" \
-          "op signin, or re-run setup to recreate $(cfg_get "identity.$name.opitem")" chk_op "$name"
+    if [[ "$(key_source "$name")" == "file" ]]; then
+      check "key file present, valid, mode 600" \
+            "re-run setup with --store file --pem, or chmod 600 $(cfg_get "identity.$name.keyfile")" chk_keyfile "$name"
+    else
+      check "1Password key reachable" \
+            "op signin, or re-run setup to recreate $(cfg_get "identity.$name.opitem")" chk_op "$name"
+    fi
     check "token mints (ghs_...)" \
           "wrong app id / installation id / PEM -- re-run setup with a fresh --pem" chk_token "$name"
     check "token cache returns identical token" \
@@ -689,8 +784,16 @@ cmd_uninstall() {
   done
   say "removed binaries from $BIN_DIR"
 
-  rm -rf "$CONFIG_DIR"
-  say "removed $CONFIG_DIR (config, rendered git confs, hooks)"
+  # Key files are credentials, same policy as 1Password items: left alone.
+  rmdir "$KEYS_DIR" 2>/dev/null || true
+  rm -f "$CONFIG_FILE" "$OWNED_GITCONFIG"
+  rm -rf "$RENDER_DIR"
+  if [[ -d "$KEYS_DIR" ]]; then
+    say "removed config and git wiring from $CONFIG_DIR"
+  else
+    rm -rf "$CONFIG_DIR"
+    say "removed $CONFIG_DIR (config, rendered git confs, hooks)"
+  fi
 
   rm -rf "$CACHE_DIR"
   say "removed token cache $CACHE_DIR"
@@ -698,6 +801,7 @@ cmd_uninstall() {
   say ""
   say "left alone (remove yourself if you want them gone):"
   say "  - the 1Password item(s) holding the app credentials"
+  [[ -d "$KEYS_DIR" ]] && say "  - private key files in $KEYS_DIR"
   say "  - $base and any clones in it"
   say "your own git identity was never modified and is unchanged"
 }
@@ -767,11 +871,15 @@ usage: agent-id <command> [flags]
 
   setup      provision an identity (idempotent; safe to re-run)
              --owner <account> --app-id <id> [--pem <path>] [--name <identity>]
+             [--store <op|file>]  op: key in 1Password (default)
+                                  file: key on disk, no 1Password (unattended use)
              [--vault <1password vault>] [--op-account <1password account>]
              [--coauthor "Name <email>"] [--base-dir <dir>]
+             --pem is only needed the first time per app; later identities of
+             the same app reuse the stored key
   doctor     verify the whole chain; non-zero exit on any failure
              [--name <identity>]
-  uninstall  remove all wiring; leaves 1Password items + clones alone  [-y]
+  uninstall  remove all wiring; leaves keys + clones alone  [-y]
   clone      clone a repo into the agent directory so the identity applies
              <owner/repo | url> [--name <identity>]
   token      print an installation token  [identity]

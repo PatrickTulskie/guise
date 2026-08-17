@@ -50,8 +50,9 @@ environment (e.g. `GH_TOKEN=$(agent-id token)`), that copy *will* expire;
 use `agent-gh`, which mints fresh per invocation, instead of exporting.
 
 If minting itself fails: `agent-id token` prints the error. Usual causes are
-1Password locked (`op signin`), the app uninstalled, or a rotated
-private key (re-run `setup --pem` with the new download).
+1Password locked (`op signin`; doesn't apply to `--store file` identities),
+the app uninstalled, or a rotated private key (re-run `setup --pem` with the
+new download).
 
 ## Cursor (or Claude Code) doesn't pick up the identity
 
