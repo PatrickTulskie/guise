@@ -1,0 +1,789 @@
+#!/usr/bin/env bash
+# agent-id — provision GitHub App agent identity for coding harnesses.
+#
+# Subcommands: setup | doctor | uninstall | clone | token
+#
+# Self-contained: the helper binaries, git config template, and commit hook
+# are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
+
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+CONFIG_DIR="$HOME/.config/agent-id"
+CONFIG_FILE="$CONFIG_DIR/config"
+OWNED_GITCONFIG="$CONFIG_DIR/gitconfig"
+RENDER_DIR="$CONFIG_DIR/git"
+HOOKS_DIR="$RENDER_DIR/agent-hooks"
+BIN_DIR="$HOME/.local/bin"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
+DEFAULT_BASEDIR="$HOME/agentic-code"
+MARK_START='# >>> agent-id >>>'
+MARK_END='# <<< agent-id <<<'
+GITHUB_API="${AGENT_ID_GITHUB_API:-https://api.github.com}"
+HELPERS="agent-id-token agent-id-credential agent-gh"
+
+say()  { printf '%s\n' "$*"; }
+warn() { printf 'agent-id: %s\n' "$*" >&2; }
+die()  { printf 'agent-id: error: %s\n' "$*" >&2; exit 1; }
+
+cfg_get() { git config -f "$CONFIG_FILE" --get "$1" 2>/dev/null; }
+cfg_set() { git config -f "$CONFIG_FILE" "$1" "$2"; }
+
+# ~-form for values written into git config files
+display_path() {
+  case "$1" in
+    "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *)         printf '%s' "$1" ;;
+  esac
+}
+
+list_identities() {
+  [[ -f "$CONFIG_FILE" ]] || return 0
+  git config -f "$CONFIG_FILE" --name-only --get-regexp '^identity\..*\.slug$' 2>/dev/null \
+    | sed -e 's/^identity\.//' -e 's/\.slug$//' | sort -u
+}
+
+basedir() { cfg_get core.basedir || printf '%s' "$DEFAULT_BASEDIR"; }
+
+ask() { # varname "prompt" [default]
+  local _var="$1" _prompt="$2" _def="${3:-}" _val=""
+  if [[ -t 0 ]]; then
+    if [[ -n "$_def" ]]; then
+      read -r -p "$_prompt [$_def]: " _val
+      _val="${_val:-$_def}"
+    else
+      read -r -p "$_prompt: " _val
+    fi
+  else
+    _val="$_def"
+  fi
+  [[ -n "$_val" ]] || die "missing required value: $_prompt (pass it as a flag; run 'agent-id help')"
+  eval "$_var=\"\$_val\""
+}
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# ---------------------------------------------------------------------------
+# Embedded artifacts. `setup` writes these out; keep them dependency-light.
+# ---------------------------------------------------------------------------
+
+write_helper_token() {
+  cat <<'EOF'
+#!/usr/bin/env bash
+# Mint a GitHub App installation access token for a named identity.
+# Usage: agent-id-token [identity]   (default: $AGENT_ID_IDENTITY or "default")
+set -euo pipefail
+
+CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
+IDENTITY="${1:-${AGENT_ID_IDENTITY:-default}}"
+
+die() { printf 'agent-id-token: %s\n' "$*" >&2; exit 1; }
+
+[[ -f "$CONFIG" ]] || die "no config at $CONFIG -- run 'agent-id setup' first"
+OP_ITEM=$(git config -f "$CONFIG" --get "identity.$IDENTITY.opitem" 2>/dev/null) \
+  || die "identity '$IDENTITY' not in config -- run 'agent-id setup --name $IDENTITY'"
+OP_ACCOUNT=$(git config -f "$CONFIG" --get "identity.$IDENTITY.opaccount" 2>/dev/null || true)
+
+op_read() {
+  if [[ -n "$OP_ACCOUNT" ]]; then op --account "$OP_ACCOUNT" read "$1"; else op read "$1"; fi
+}
+
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
+mkdir -p "$CACHE_DIR"; chmod 700 "$CACHE_DIR"
+TOKEN_FILE="$CACHE_DIR/$IDENTITY.token.json"
+
+# Expiry is self-computed at mint time; BSD and GNU date disagree on parsing
+# GitHub's ISO-8601 expires_at, so we never parse it.
+if [[ -f "$TOKEN_FILE" ]]; then
+  cached_exp=$(jq -r '.expires_unix // 0' "$TOKEN_FILE")
+  if (( cached_exp - $(date +%s) > 300 )); then
+    jq -r '.token' "$TOKEN_FILE"
+    exit 0
+  fi
+fi
+
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# Token acquisition lives in this one function so an alternate source
+# (e.g. a remote token service) is a single-body swap.
+mint_token() {
+  local app_id install_id now header payload signature jwt
+  app_id=$(op_read "$OP_ITEM/app_id") \
+    || die "op read failed -- 1Password locked, or item missing ($OP_ITEM)"
+  install_id=$(op_read "$OP_ITEM/installation_id") \
+    || die "op read failed for installation_id ($OP_ITEM)"
+
+  now=$(date +%s)
+  header=$(printf '{"typ":"JWT","alg":"RS256"}' | b64url)
+  # iat backdated 60s for clock skew; GitHub rejects exp > 10 min out
+  payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$app_id" | b64url)
+
+  # PEM reaches openssl via process substitution -- never written to disk.
+  signature=$(printf '%s.%s' "$header" "$payload" \
+    | openssl dgst -sha256 -sign <(op_read "$OP_ITEM/private_key") -binary \
+    | b64url)
+  jwt="${header}.${payload}.${signature}"
+
+  curl -sf -X POST \
+    -H "Authorization: Bearer ${jwt}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${AGENT_ID_GITHUB_API:-https://api.github.com}/app/installations/${install_id}/access_tokens" \
+    || die "failed to mint installation token -- check app id, installation id, PEM validity, app still installed"
+}
+
+mint_unix=$(date +%s)
+response=$(mint_token)
+
+# Tokens are valid 1h; treat as 55m to stay clear of the boundary.
+printf '%s' "$response" \
+  | jq --argjson exp "$((mint_unix + 3300))" '. + {expires_unix: $exp}' \
+  > "$TOKEN_FILE"
+chmod 600 "$TOKEN_FILE"
+
+jq -r '.token' "$TOKEN_FILE"
+EOF
+}
+
+write_helper_credential() {
+  cat <<'EOF'
+#!/usr/bin/env bash
+# Git credential helper. Invoked from agent-scoped git config as:
+#   agent-id-credential <identity> <get|store|erase>
+# Must drain stdin in all cases or git may block on the write side.
+set -euo pipefail
+
+IDENTITY="default"
+if [[ $# -ge 2 ]]; then IDENTITY="$1"; shift; fi
+
+case "${1:-}" in
+  get)
+    cat >/dev/null
+    echo "username=x-access-token"
+    echo "password=$("$(cd "$(dirname "$0")" && pwd)/agent-id-token" "$IDENTITY")"
+    ;;
+  *)
+    # store/erase: tokens are ephemeral, nothing to persist. Exit clean.
+    cat >/dev/null
+    exit 0
+    ;;
+esac
+EOF
+}
+
+write_helper_gh() {
+  cat <<'EOF'
+#!/usr/bin/env bash
+# Run `gh` as the agent bot. Identity is inferred from the current directory
+# (basedir/<identity>/...), overridable with AGENT_ID_IDENTITY.
+# gh prefers GH_TOKEN over its stored credentials, so this is sufficient.
+set -euo pipefail
+
+CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
+IDENTITY="${AGENT_ID_IDENTITY:-}"
+
+if [[ -z "$IDENTITY" && -f "$CONFIG" ]]; then
+  basedir=$(git config -f "$CONFIG" --get core.basedir 2>/dev/null || true)
+  if [[ -n "$basedir" ]]; then
+    case "$PWD/" in
+      "$basedir"/*)
+        rel="${PWD#"$basedir"/}"
+        IDENTITY="${rel%%/*}"
+        ;;
+    esac
+  fi
+fi
+IDENTITY="${IDENTITY:-default}"
+
+GH_TOKEN="$("$(cd "$(dirname "$0")" && pwd)/agent-id-token" "$IDENTITY")" exec gh "$@"
+EOF
+}
+
+write_hook() {
+  cat <<'EOF'
+#!/usr/bin/env bash
+# Append the human co-author trailer to every agent commit.
+#
+# prepare-commit-msg (not commit-msg) so `git commit -m` is covered.
+# The trailer survives rebase merge and is parsed natively by GitHub,
+# so the human keeps contribution credit for agent-authored commits.
+set -euo pipefail
+
+MSG_FILE="$1"
+COMMIT_SOURCE="${2:-}"
+
+# Skip merges and squashes -- trailers there are noise.
+[[ "$COMMIT_SOURCE" == "merge" || "$COMMIT_SOURCE" == "squash" ]] && exit 0
+
+CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
+CO_AUTHOR="${AGENT_ID_CO_AUTHOR:-}"
+if [[ -z "$CO_AUTHOR" && -f "$CONFIG" ]]; then
+  CO_AUTHOR=$(git config -f "$CONFIG" --get core.coauthor 2>/dev/null || true)
+fi
+if [[ -z "$CO_AUTHOR" ]]; then
+  CO_AUTHOR="$(git config --global user.name) <$(git config --global user.email)>"
+fi
+
+git interpret-trailers --if-exists doNothing \
+  --trailer "Co-authored-by: ${CO_AUTHOR}" \
+  --in-place "$MSG_FILE"
+EOF
+}
+
+agent_conf_template() {
+  cat <<'EOF'
+# Generated by agent-id -- do not hand-edit; re-run `agent-id setup` instead.
+
+[user]
+	name = {{SLUG}}[bot]
+	email = {{BOT_USER_ID}}+{{SLUG}}[bot]@users.noreply.github.com
+
+[commit]
+	# The bot has no signing key; global config almost certainly sets this true.
+	gpgsign = false
+
+[tag]
+	gpgsign = false
+
+[credential "https://github.com"]
+	# Empty value CLEARS inherited helpers (osxkeychain), otherwise the
+	# human's cached credentials win and commits push as the human.
+	helper =
+	helper = {{BIN_DIR}}/agent-id-credential {{NAME}}
+
+[core]
+	hooksPath = {{HOOKS_DIR}}
+
+[url "https://github.com/"]
+	# ssh would authenticate as the human's key; force https so the
+	# credential helper (and therefore the bot identity) always wins.
+	insteadOf = git@github.com:
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Rendering + ~/.gitconfig wiring
+# ---------------------------------------------------------------------------
+
+install_binaries() {
+  mkdir -p "$BIN_DIR"
+  write_helper_token      > "$BIN_DIR/agent-id-token"
+  write_helper_credential > "$BIN_DIR/agent-id-credential"
+  write_helper_gh         > "$BIN_DIR/agent-gh"
+  chmod 755 "$BIN_DIR/agent-id-token" "$BIN_DIR/agent-id-credential" "$BIN_DIR/agent-gh"
+  if [[ "$SCRIPT_PATH" != "$BIN_DIR/agent-id" ]]; then
+    cp "$SCRIPT_PATH" "$BIN_DIR/agent-id"
+    chmod 755 "$BIN_DIR/agent-id"
+  fi
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *) warn "$BIN_DIR is not on your PATH -- add it to your shell profile" ;;
+  esac
+}
+
+install_hook() {
+  mkdir -p "$HOOKS_DIR"
+  write_hook > "$HOOKS_DIR/prepare-commit-msg"
+  chmod 755 "$HOOKS_DIR/prepare-commit-msg"
+}
+
+render_identity_conf() { # name
+  local name="$1" slug bot tmpl
+  slug=$(cfg_get "identity.$name.slug") || die "identity '$name' missing slug"
+  bot=$(cfg_get "identity.$name.botuserid") || die "identity '$name' missing botuserid"
+  tmpl=$(agent_conf_template)
+  tmpl=${tmpl//"{{SLUG}}"/$slug}
+  tmpl=${tmpl//"{{BOT_USER_ID}}"/$bot}
+  tmpl=${tmpl//"{{NAME}}"/$name}
+  tmpl=${tmpl//"{{BIN_DIR}}"/$BIN_DIR}
+  tmpl=${tmpl//"{{HOOKS_DIR}}"/$HOOKS_DIR}
+  mkdir -p "$RENDER_DIR"
+  printf '%s\n' "$tmpl" > "$RENDER_DIR/$name.conf"
+}
+
+# Regenerate the file we own: one includeIf block per identity. ~/.gitconfig
+# itself only ever holds a single [include] pointing here.
+regen_owned_gitconfig() {
+  local base name
+  base=$(basedir)
+  {
+    echo "# Generated by agent-id -- do not hand-edit; re-run 'agent-id setup' instead."
+    for name in $(list_identities); do
+      echo
+      echo "[includeIf \"gitdir:$(display_path "$base/$name/")\"]"
+      printf '\tpath = git/%s.conf\n' "$name"
+    done
+  } > "$OWNED_GITCONFIG"
+}
+
+include_block() {
+  printf '%s\n[include]\n\tpath = %s\n%s' \
+    "$MARK_START" "$(display_path "$OWNED_GITCONFIG")" "$MARK_END"
+}
+
+ensure_include_block() {
+  local gitconfig="$HOME/.gitconfig" block current tmp
+  block=$(include_block)
+  touch "$gitconfig"
+  if grep -qF "$MARK_START" "$gitconfig"; then
+    current=$(awk -v s="$MARK_START" -v e="$MARK_END" '$0==s{f=1} f{print} $0==e{f=0}' "$gitconfig")
+    [[ "$current" == "$block" ]] && return 0
+    tmp=$(mktemp)
+    awk -v s="$MARK_START" -v e="$MARK_END" -v b="$block" \
+      '$0==s{print b; f=1; next} $0==e{f=0; next} f{next} {print}' \
+      "$gitconfig" > "$tmp" && mv "$tmp" "$gitconfig"
+  else
+    printf '\n%s\n' "$block" >> "$gitconfig"
+  fi
+}
+
+remove_include_block() {
+  local gitconfig="$HOME/.gitconfig" tmp
+  [[ -f "$gitconfig" ]] || return 0
+  grep -qF "$MARK_START" "$gitconfig" || return 0
+  tmp=$(mktemp)
+  # Drop the block plus the single blank line setup inserted above it.
+  awk -v s="$MARK_START" -v e="$MARK_END" '
+    $0==s { inb=1; if (n > 0 && lines[n] == "") n--; next }
+    $0==e { inb=0; next }
+    inb   { next }
+          { lines[++n]=$0 }
+    END   { for (i=1; i<=n; i++) print lines[i] }
+  ' "$gitconfig" > "$tmp" && mv "$tmp" "$gitconfig"
+}
+
+# ---------------------------------------------------------------------------
+# setup
+# ---------------------------------------------------------------------------
+
+cmd_setup() {
+  local owner="" app_id="" pem="" name="default" vault="Private" coauthor="" base="" op_account=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --owner)      owner="$2"; shift 2 ;;
+      --app-id)     app_id="$2"; shift 2 ;;
+      --pem)        pem="$2"; shift 2 ;;
+      --name)       name="$2"; shift 2 ;;
+      --vault)      vault="$2"; shift 2 ;;
+      --op-account) op_account="$2"; shift 2 ;;
+      --coauthor)   coauthor="$2"; shift 2 ;;
+      --base-dir)   base="$2"; shift 2 ;;
+      *) die "setup: unknown flag '$1'" ;;
+    esac
+  done
+
+  op_do() {
+    if [[ -n "$op_account" ]]; then op --account "$op_account" "$@"; else op "$@"; fi
+  }
+
+  local name_re='^[A-Za-z0-9_-]+$'
+  [[ "$name" =~ $name_re ]] || die "identity name must match [A-Za-z0-9_-]+: '$name'"
+
+  local dep
+  for dep in op gh jq openssl git curl; do
+    command -v "$dep" >/dev/null || die "missing dependency: $dep"
+  done
+  # Not `op whoami`: it reports session-token state and fails under the
+  # desktop app's biometric integration even when real operations work.
+  op_do vault get "$vault" >/dev/null 2>&1 \
+    || die "1Password vault '$vault' unreachable -- not signed in (op signin / enable CLI integration) or the vault doesn't exist"
+
+  [[ -n "$owner" ]]  || ask owner "GitHub account (user or org) the app is installed on"
+  [[ -n "$app_id" ]] || ask app_id "App ID (top of the app settings page)"
+  local num_re='^[0-9]+$'
+  [[ "$app_id" =~ $num_re ]] || die "app id must be numeric, got '$app_id'"
+
+  [[ -n "$base" ]] || base=$(cfg_get core.basedir) || base="$DEFAULT_BASEDIR"
+
+  # Optional: when unset, the hook falls back to global user.name/email at
+  # commit time, so it tracks the engineer's real config instead of a copy.
+  if [[ -z "$coauthor" ]]; then
+    coauthor=$(cfg_get core.coauthor) || true
+  fi
+
+  # PEM source: a fresh download, or the key already stored in 1Password.
+  local op_item="op://$vault/"
+  local item_title="" pem_source=""
+  if [[ -n "$pem" ]]; then
+    [[ -f "$pem" ]] || die "PEM not found at $pem"
+    openssl pkey -in "$pem" -noout 2>/dev/null || die "$pem is not a valid private key"
+    pem_source="file"
+  fi
+
+  # --- discover slug, installation id, bot user id -------------------------
+  say "==> discovering app metadata from GitHub"
+  local now header payload signature jwt
+  now=$(date +%s)
+  header=$(printf '{"typ":"JWT","alg":"RS256"}' | b64url)
+  payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$app_id" | b64url)
+  if [[ "$pem_source" == "file" ]]; then
+    signature=$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$pem" -binary | b64url)
+  else
+    # No fresh PEM: re-run against the key already in 1Password.
+    local existing_item
+    existing_item=$(cfg_get "identity.$name.opitem") \
+      || die "no --pem given and identity '$name' not previously set up -- pass --pem <downloaded .pem>"
+    signature=$(printf '%s.%s' "$header" "$payload" \
+      | openssl dgst -sha256 -sign <(op_do read "$existing_item/private_key") -binary | b64url) \
+      || die "could not read private key from $existing_item -- pass --pem to store a fresh one"
+  fi
+  jwt="${header}.${payload}.${signature}"
+
+  api() {
+    curl -sf \
+      -H "Authorization: Bearer ${jwt}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "${GITHUB_API}$1"
+  }
+
+  local app_json slug
+  app_json=$(api /app) || die "GitHub rejected the app JWT -- wrong App ID, or PEM doesn't belong to app $app_id"
+  slug=$(printf '%s' "$app_json" | jq -r '.slug')
+  [[ "$(printf '%s' "$app_json" | jq -r '.id')" == "$app_id" ]] || die "App ID mismatch -- expected $app_id, API returned $(printf '%s' "$app_json" | jq -r '.id')"
+  say "    app slug: $slug"
+
+  local installs install_id
+  installs=$(api "/app/installations?per_page=100") || die "could not list installations for the app"
+  install_id=$(printf '%s' "$installs" | jq -r --arg owner "$owner" '.[] | select(.account.login == $owner) | .id')
+  [[ -n "$install_id" && "$install_id" != "null" ]] \
+    || die "app '$slug' is not installed on '$owner' -- do the install step (see README)"
+  say "    installation id: $install_id"
+
+  local bot_user_id
+  bot_user_id=$(curl -sf "${GITHUB_API}/users/${slug}%5Bbot%5D" | jq -r '.id') \
+    || die "could not resolve bot user ${slug}[bot]"
+  [[ "$bot_user_id" != "$app_id" ]] || die "bot user id equals app id ($app_id) -- that can't be right, refusing"
+  say "    bot user id: $bot_user_id (this goes in the commit email, NOT the app id)"
+
+  # --- store credentials in 1Password, shred the PEM ------------------------
+  item_title="$slug"
+  op_item="op://$vault/$item_title"
+  say "==> storing credentials in 1Password ($op_item)"
+  if op_do item get "$item_title" --vault "$vault" >/dev/null 2>&1; then
+    if [[ "$pem_source" == "file" ]]; then
+      op_do item edit "$item_title" --vault "$vault" \
+        "app_id[text]=$app_id" \
+        "installation_id[text]=$install_id" \
+        "private_key[concealed]=$(cat "$pem")" >/dev/null
+    else
+      op_do item edit "$item_title" --vault "$vault" \
+        "app_id[text]=$app_id" \
+        "installation_id[text]=$install_id" >/dev/null
+    fi
+  else
+    [[ "$pem_source" == "file" ]] || die "1Password item '$item_title' doesn't exist and no --pem given"
+    op_do item create --category "API Credential" --title "$item_title" --vault "$vault" \
+      "app_id[text]=$app_id" \
+      "installation_id[text]=$install_id" \
+      "private_key[concealed]=$(cat "$pem")" >/dev/null
+  fi
+  [[ "$(op_do read "$op_item/app_id")" == "$app_id" ]] || die "1Password readback failed for $op_item/app_id"
+
+  if [[ "$pem_source" == "file" ]]; then
+    if command -v shred >/dev/null; then
+      shred -u "$pem"
+    else
+      rm -f "$pem"
+      warn "shred not available -- PEM removed with rm (contents may persist on disk)"
+    fi
+    say "    PEM stored and local file shredded"
+  fi
+
+  # --- write config + render everything -------------------------------------
+  say "==> writing config and git wiring"
+  mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
+  touch "$CONFIG_FILE"; chmod 600 "$CONFIG_FILE"
+  cfg_set core.basedir "$base"
+  if [[ -n "$coauthor" ]]; then
+    cfg_set core.coauthor "$coauthor"
+  fi
+  if [[ -n "$op_account" ]]; then
+    cfg_set "identity.$name.opaccount" "$op_account"
+  fi
+  cfg_set "identity.$name.owner" "$owner"
+  cfg_set "identity.$name.appid" "$app_id"
+  cfg_set "identity.$name.slug" "$slug"
+  cfg_set "identity.$name.installationid" "$install_id"
+  cfg_set "identity.$name.botuserid" "$bot_user_id"
+  cfg_set "identity.$name.opitem" "$op_item"
+
+  install_binaries
+  install_hook
+  render_identity_conf "$name"
+  regen_owned_gitconfig
+  ensure_include_block
+  mkdir -p "$base/$name"
+
+  say "==> setup complete for identity '$name'"
+  say "    agent clones go in $base/$name/ (use 'agent-id clone <owner/repo>')"
+  say ""
+  cmd_doctor --name "$name"
+}
+
+# ---------------------------------------------------------------------------
+# doctor
+# ---------------------------------------------------------------------------
+
+DOCTOR_FAILURES=0
+
+check() { # "description" "remediation hint" fn args...
+  local desc="$1" hint="$2"; shift 2
+  if "$@" >/dev/null 2>&1; then
+    printf '  ok    %s\n' "$desc"
+  else
+    printf '  FAIL  %s\n' "$desc"
+    printf '        hint: %s\n' "$hint"
+    DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+  fi
+}
+
+expected_email() { # name
+  printf '%s+%s[bot]@users.noreply.github.com' \
+    "$(cfg_get "identity.$1.botuserid")" "$(cfg_get "identity.$1.slug")"
+}
+
+chk_deps() { local c; for c in op gh jq openssl git curl; do command -v "$c" >/dev/null || return 1; done; }
+chk_op() {
+  local acct
+  acct=$(cfg_get "identity.$1.opaccount") || acct=""
+  if [[ -n "$acct" ]]; then
+    op --account "$acct" read "$(cfg_get "identity.$1.opitem")/app_id" >/dev/null
+  else
+    op read "$(cfg_get "identity.$1.opitem")/app_id" >/dev/null
+  fi
+}
+chk_token() { local t re='^ghs_'; t=$("$BIN_DIR/agent-id-token" "$1"); [[ "$t" =~ $re ]]; }
+chk_cache() {
+  local a b
+  a=$("$BIN_DIR/agent-id-token" "$1"); b=$("$BIN_DIR/agent-id-token" "$1")
+  [[ "$a" == "$b" && -f "$CACHE_DIR/$1.token.json" ]]
+}
+chk_email_format() {
+  local re='^[0-9]+\+.*\[bot\]@users\.noreply\.github\.com$'
+  [[ "$(expected_email "$1")" =~ $re ]]
+}
+chk_bot_real() {
+  local id
+  id=$(curl -sf "${GITHUB_API}/users/$(cfg_get "identity.$1.slug")%5Bbot%5D" | jq -r '.id')
+  [[ "$id" == "$(cfg_get "identity.$1.botuserid")" ]]
+}
+chk_ids_differ() { [[ "$(cfg_get "identity.$1.appid")" != "$(cfg_get "identity.$1.botuserid")" ]]; }
+
+with_scoped_repo() { # name cmd... -- runs cmd with $REPO set to a repo inside scope
+  local name="$1"; shift
+  local dir rc=0
+  [[ -d "$(basedir)/$name" ]] || return 1
+  dir=$(mktemp -d "$(basedir)/$name/.doctor.XXXXXX")
+  git init -q "$dir/repo"
+  REPO="$dir/repo" "$@" || rc=$?
+  rm -rf "$dir"
+  return $rc
+}
+_chk_includeif() {
+  [[ "$(git -C "$REPO" config --show-origin --get user.email)" == *"/git/$1.conf"* ]] \
+    && [[ "$(git -C "$REPO" config --get user.email)" == "$(expected_email "$1")" ]]
+}
+chk_includeif() { with_scoped_repo "$1" _chk_includeif "$1"; }
+_chk_gpgsign() { [[ "$(git -C "$REPO" config --get commit.gpgsign)" == "false" ]]; }
+chk_gpgsign() { with_scoped_repo "$1" _chk_gpgsign; }
+_chk_credential() {
+  printf 'protocol=https\nhost=github.com\n\n' \
+    | GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false git -C "$REPO" credential fill \
+    | grep -q '^username=x-access-token$'
+}
+chk_credential() { with_scoped_repo "$1" _chk_credential; }
+chk_human_untouched() {
+  local dir rc=0
+  dir=$(mktemp -d)
+  git init -q "$dir/repo"
+  [[ "$(git -C "$dir/repo" config --get user.email 2>/dev/null || true)" == "$(git config --global --get user.email 2>/dev/null || true)" ]] \
+    && [[ "$(git -C "$dir/repo" config --get commit.gpgsign 2>/dev/null || true)" == "$(git config --global --get commit.gpgsign 2>/dev/null || true)" ]] \
+    || rc=1
+  rm -rf "$dir"
+  return $rc
+}
+chk_hook() { [[ -x "$HOOKS_DIR/prepare-commit-msg" ]]; }
+chk_binaries() { local b; for b in $HELPERS; do [[ -x "$BIN_DIR/$b" ]] || return 1; done; }
+
+cmd_doctor() {
+  local only=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) only="$2"; shift 2 ;;
+      *) die "doctor: unknown flag '$1'" ;;
+    esac
+  done
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+
+  say "doctor:"
+  check "dependencies present (op gh jq openssl git curl)" \
+        "brew install the missing one" chk_deps
+  check "helper binaries installed in $BIN_DIR" \
+        "re-run 'agent-id setup'" chk_binaries
+  check "co-author hook installed and executable" \
+        "re-run 'agent-id setup'" chk_hook
+  check "human identity untouched outside $(basedir)" \
+        "something overrode global config -- inspect ~/.gitconfig for stray edits" chk_human_untouched
+
+  local names name
+  names=$(list_identities)
+  [[ -n "$names" ]] || die "no identities in config -- run 'agent-id setup'"
+  if [[ -n "$only" ]]; then names="$only"; fi
+
+  for name in $names; do
+    say ""
+    say "identity '$name' ($(cfg_get "identity.$name.slug") on $(cfg_get "identity.$name.owner")):"
+    check "1Password item reachable" \
+          "op signin, or re-run setup to recreate $(cfg_get "identity.$name.opitem")" chk_op "$name"
+    check "token mints (ghs_...)" \
+          "wrong app id / installation id / PEM -- re-run setup with a fresh --pem" chk_token "$name"
+    check "token cache returns identical token" \
+          "cache dir $CACHE_DIR unwritable, or expiry math broken" chk_cache "$name"
+    check "bot email well-formed" \
+          "re-run setup; email must be <botUserId>+<slug>[bot]@users.noreply.github.com" chk_email_format "$name"
+    check "bot user id matches GitHub" \
+          "slug or bot user id stale -- re-run setup to rediscover" chk_bot_real "$name"
+    check "app id != bot user id (the classic mixup)" \
+          "config has the app id in the email -- re-run setup" chk_ids_differ "$name"
+    check "includeIf resolves identity inside $(basedir)/$name/" \
+          "check the include block in ~/.gitconfig and $OWNED_GITCONFIG" chk_includeif "$name"
+    check "commit signing off in agent scope" \
+          "rendered conf should set commit.gpgsign=false -- re-run setup" chk_gpgsign "$name"
+    check "credential helper wins (x-access-token)" \
+          "inherited osxkeychain not cleared -- rendered conf needs the empty 'helper =' line" chk_credential "$name"
+  done
+
+  say ""
+  if [[ $DOCTOR_FAILURES -gt 0 ]]; then
+    say "doctor: $DOCTOR_FAILURES check(s) failed"
+    exit 1
+  fi
+  say "doctor: all checks passed"
+}
+
+# ---------------------------------------------------------------------------
+# uninstall
+# ---------------------------------------------------------------------------
+
+cmd_uninstall() {
+  local yes="" b base
+  base=$(basedir)
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -y|--yes) yes=1; shift ;;
+      *) die "uninstall: unknown flag '$1'" ;;
+    esac
+  done
+  if [[ -z "$yes" && -t 0 ]]; then
+    read -r -p "Remove agent-id wiring (gitconfig include, binaries, config, token cache)? [y/N] " reply
+    case "$reply" in y|Y|yes) ;; *) say "aborted"; exit 0 ;; esac
+  fi
+
+  remove_include_block
+  say "removed agent-id block from ~/.gitconfig"
+
+  for b in $HELPERS agent-id; do
+    rm -f "$BIN_DIR/$b"
+  done
+  say "removed binaries from $BIN_DIR"
+
+  rm -rf "$CONFIG_DIR"
+  say "removed $CONFIG_DIR (config, rendered git confs, hooks)"
+
+  rm -rf "$CACHE_DIR"
+  say "removed token cache $CACHE_DIR"
+
+  say ""
+  say "left alone (remove yourself if you want them gone):"
+  say "  - the 1Password item(s) holding the app credentials"
+  say "  - $base and any clones in it"
+  say "your own git identity was never modified and is unchanged"
+}
+
+# ---------------------------------------------------------------------------
+# clone
+# ---------------------------------------------------------------------------
+
+cmd_clone() {
+  local repo="" name=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) name="$2"; shift 2 ;;
+      -*) die "clone: unknown flag '$1'" ;;
+      *) repo="$1"; shift ;;
+    esac
+  done
+  [[ -n "$repo" ]] || die "usage: agent-id clone <owner/repo | https url> [--name identity]"
+  [[ -f "$CONFIG_FILE" ]] || die "run 'agent-id setup' first"
+
+  if [[ -z "$name" ]]; then
+    local count
+    count=$(list_identities | wc -l | tr -d ' ')
+    if [[ "$count" == "1" ]]; then
+      name=$(list_identities)
+    else
+      name="default"
+    fi
+  fi
+  cfg_get "identity.$name.slug" >/dev/null || die "identity '$name' not in config"
+
+  local url
+  case "$repo" in
+    https://*) url="$repo" ;;
+    git@github.com:*)
+      url="https://github.com/${repo#git@github.com:}"
+      warn "rewrote ssh URL to https -- ssh would push as YOU, not the bot"
+      ;;
+    */*) url="https://github.com/$repo.git" ;;
+    *) die "can't parse repo '$repo' -- use owner/repo or an https URL" ;;
+  esac
+
+  local dest
+  dest="$(basedir)/$name/$(basename "$url" .git)"
+  [[ -e "$dest" ]] && die "$dest already exists"
+  say "cloning into $dest (identity '$name' applies here)"
+  git clone "$url" "$dest"
+  say "done -- work in $dest; use 'agent-gh' instead of 'gh' for PRs"
+}
+
+# ---------------------------------------------------------------------------
+# token
+# ---------------------------------------------------------------------------
+
+cmd_token() {
+  [[ -x "$BIN_DIR/agent-id-token" ]] || die "helpers not installed -- run 'agent-id setup' first"
+  exec "$BIN_DIR/agent-id-token" "${1:-default}"
+}
+
+# ---------------------------------------------------------------------------
+
+usage() {
+  cat <<EOF
+agent-id -- GitHub App agent identity for coding harnesses
+
+usage: agent-id <command> [flags]
+
+  setup      provision an identity (idempotent; safe to re-run)
+             --owner <account> --app-id <id> [--pem <path>] [--name <identity>]
+             [--vault <1password vault>] [--op-account <1password account>]
+             [--coauthor "Name <email>"] [--base-dir <dir>]
+  doctor     verify the whole chain; non-zero exit on any failure
+             [--name <identity>]
+  uninstall  remove all wiring; leaves 1Password items + clones alone  [-y]
+  clone      clone a repo into the agent directory so the identity applies
+             <owner/repo | url> [--name <identity>]
+  token      print an installation token  [identity]
+EOF
+}
+
+case "${1:-}" in
+  setup)     shift; cmd_setup "$@" ;;
+  doctor)    shift; cmd_doctor "$@" ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
+  clone)     shift; cmd_clone "$@" ;;
+  token)     shift; cmd_token "$@" ;;
+  help|--help|-h|"") usage ;;
+  *) usage >&2; die "unknown command '${1}'" ;;
+esac

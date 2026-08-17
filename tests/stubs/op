@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Fake 1Password CLI backed by files under $OP_FAKE_DIR/<vault>/<item>/<field>.
+set -euo pipefail
+
+dir="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
+
+if [[ "${1:-}" == "--account" ]]; then
+  [[ -n "${OP_FAKE_ACCOUNT:-}" && "$2" == "$OP_FAKE_ACCOUNT" ]] \
+    || { echo "op stub: unexpected account: $2" >&2; exit 1; }
+  shift 2
+fi
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  whoami)
+    echo "stub@example.com"
+    ;;
+  read)
+    ref="${1#op://}"
+    [[ -f "$dir/$ref" ]] || { echo "op stub: no such field: $1" >&2; exit 1; }
+    cat "$dir/$ref"
+    ;;
+  vault)
+    [[ "${1:-}" == "get" ]] || { echo "op stub: unsupported: vault ${1:-}" >&2; exit 1; }
+    echo "{}"
+    ;;
+  item)
+    sub="${1:-}"; shift || true
+    title="" vault=""
+    fields=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --vault) vault="$2"; shift 2 ;;
+        --title) title="$2"; shift 2 ;;
+        --category) shift 2 ;;
+        *=*) fields+=("$1"); shift ;;
+        *) title="${title:-$1}"; shift ;;
+      esac
+    done
+    vault="${vault:?op stub: --vault required}"
+    title="${title:?op stub: item title required}"
+    case "$sub" in
+      get)
+        [[ -d "$dir/$vault/$title" ]] || { echo "op stub: no item $title" >&2; exit 1; }
+        echo "{}"
+        ;;
+      create|edit)
+        [[ "$sub" == "edit" && ! -d "$dir/$vault/$title" ]] && { echo "op stub: edit of missing item" >&2; exit 1; }
+        mkdir -p "$dir/$vault/$title"
+        for f in ${fields+"${fields[@]}"}; do
+          key="${f%%=*}"; val="${f#*=}"
+          key="${key%%\[*}"
+          printf '%s' "$val" > "$dir/$vault/$title/$key"
+        done
+        echo "{}"
+        ;;
+      *) echo "op stub: unsupported: item $sub" >&2; exit 1 ;;
+    esac
+    ;;
+  *)
+    echo "op stub: unsupported: $cmd" >&2; exit 1
+    ;;
+esac

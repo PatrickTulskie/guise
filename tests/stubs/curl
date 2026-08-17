@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Fake GitHub API. Matches on the URL, logs every call to $CURL_LOG.
+set -euo pipefail
+
+url=""
+for a in "$@"; do
+  case "$a" in https://*) url="$a" ;; esac
+done
+[[ -n "${CURL_LOG:-}" ]] && echo "$url" >> "$CURL_LOG"
+
+case "$url" in
+  */app/installations/*/access_tokens)
+    printf '{"token":"ghs_stubtoken%s","expires_at":"2099-01-01T00:00:00Z"}' "$$"
+    ;;
+  */app/installations*)
+    printf '[{"id":%s,"account":{"login":"%s"}}]' "${FAKE_INSTALL_ID:?}" "${FAKE_OWNER:?}"
+    ;;
+  */app)
+    printf '{"id":%s,"slug":"%s"}' "${FAKE_APP_ID:?}" "${FAKE_SLUG:?}"
+    ;;
+  */users/*)
+    printf '{"id":%s}' "${FAKE_BOT_ID:?}"
+    ;;
+  *)
+    echo "curl stub: unmatched url: $url" >&2
+    exit 22
+    ;;
+esac
