@@ -85,6 +85,7 @@ read_identity_secret() { # name -> PEM (app) or PAT (user) on stdout
     path=$(secret_file "$1") && [[ -f "$path" ]] || return 1
     cat "$path"
   else
+    command -v op >/dev/null || die "missing dependency: op -- identity '$1' keeps its secret in 1Password"
     item=$(cfg_get "identity.$1.opitem") || return 1
     acct=$(cfg_get "identity.$1.opaccount") || acct=""
     if [[ -n "$acct" ]]; then op --account "$acct" read "$item/$(secret_field "$1")"
@@ -518,8 +519,8 @@ remove_include_block() {
 # ---------------------------------------------------------------------------
 
 cmd_setup() {
-  local owner="" app_id="" pem="" name="" vault="Private" coauthor="" base="" op_account="" store="op"
-  local kind="" login="" token_file="" store_given=""
+  local owner="" app_id="" pem="" name="" vault="Private" coauthor="" base="" op_account="" store=""
+  local kind="" login="" token_file=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)       kind="$2"; shift 2 ;;
@@ -529,7 +530,7 @@ cmd_setup() {
       --login)      login="$2"; shift 2 ;;
       --token-file) token_file="$2"; shift 2 ;;
       --name)       name="$2"; shift 2 ;;
-      --store)      store="$2"; store_given=1; shift 2 ;;
+      --store)      store="$2"; shift 2 ;;
       --vault)      vault="$2"; shift 2 ;;
       --op-account) op_account="$2"; shift 2 ;;
       --coauthor)   coauthor="$2"; shift 2 ;;
@@ -547,7 +548,8 @@ cmd_setup() {
   if [[ -n "$name" ]]; then
     [[ "$name" =~ $name_re ]] || die "identity name must match [A-Za-z0-9_-]+: '$name'"
   fi
-  [[ "$store" == "op" || "$store" == "file" ]] || die "--store must be 'op' or 'file', got '$store'"
+  [[ -z "$store" || "$store" == "op" || "$store" == "file" ]] \
+    || die "--store must be 'op' or 'file', got '$store'"
 
   # Re-running setup for an existing identity keeps its kind unless told
   # otherwise; with no name there is nothing to look up, so apps win the tie.
@@ -555,16 +557,11 @@ cmd_setup() {
     if [[ -n "$name" ]]; then kind=$(identity_kind "$name"); else kind="app"; fi
   fi
 
-  # Which existing identity a bare re-run is about: the named one, or the
+  # Whose stored secret a bare re-run may reuse: the named identity, or the
   # default when no name was given (which is the one it would derive anyway).
   local probe="$name"
   [[ -n "$probe" ]] || probe=$(default_identity)
 
-  # Re-running setup is the advertised repair action, so it must not move an
-  # existing secret between stores just because --store wasn't repeated.
-  if [[ -z "$store_given" ]] && identity_exists "$probe"; then
-    store=$(key_source "$probe")
-  fi
   [[ "$kind" == "app" || "$kind" == "user" ]] || die "--kind must be 'app' or 'user', got '$kind'"
   if [[ "$kind" == "user" ]]; then
     [[ -z "$owner$app_id$pem" ]] \
@@ -577,13 +574,6 @@ cmd_setup() {
   for dep in gh jq openssl git curl; do
     command -v "$dep" >/dev/null || die "missing dependency: $dep"
   done
-  if [[ "$store" == "op" ]]; then
-    command -v op >/dev/null || die "missing dependency: op (or use --store file to keep the secret on disk)"
-    # Not `op whoami`: it reports session-token state and fails under the
-    # desktop app's biometric integration even when real operations work.
-    op_do vault get "$vault" >/dev/null 2>&1 \
-      || die "1Password vault '$vault' unreachable -- not signed in (op signin / enable CLI integration) or the vault doesn't exist"
-  fi
 
   [[ -n "$base" ]] || base=$(cfg_get core.basedir) || base="$DEFAULT_BASEDIR"
 
@@ -735,9 +725,23 @@ cmd_setup() {
   [[ "$name" =~ $name_re ]] \
     || die "can't use '$name' as an identity name -- pass --name explicitly"
 
+  # Deferred until the name is settled: an explicit --store wins, an existing
+  # identity keeps the store it already uses (re-running setup is the advertised
+  # repair action, so it must not move a secret), and anything new goes to
+  # 1Password. Deciding any earlier would make a new identity inherit the store
+  # of whatever unrelated identity happened to be the default.
+  if [[ -z "$store" ]]; then
+    if identity_exists "$name"; then store=$(key_source "$name"); else store="op"; fi
+  fi
+
   # --- store the secret (1Password or a local file), shred the source -------
   mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
   if [[ "$store" == "op" ]]; then
+    command -v op >/dev/null || die "missing dependency: op (or use --store file to keep the secret on disk)"
+    # Not `op whoami`: it reports session-token state and fails under the
+    # desktop app's biometric integration even when real operations work.
+    op_do vault get "$vault" >/dev/null 2>&1 \
+      || die "1Password vault '$vault' unreachable -- not signed in (op signin / enable CLI integration) or the vault doesn't exist"
     local op_fields readback_field readback_value
     if [[ "$kind" == "user" ]]; then
       op_fields=("login[text]=$login" "token[concealed]=$secret_material")
@@ -1243,9 +1247,12 @@ usage: agent-id <command> [flags]
                setup reuses a stored token or prompts (never via argv)
              common:
                [--name <identity>]  default: the app slug / account login
-               [--store <op|file>]  op: secret in 1Password (default)
+               [--store <op|file>]  op: secret in 1Password (default for a
+                                        new identity)
                                     file: secret on disk, no 1Password
                                           (unattended use)
+                                    re-running setup keeps the store the
+                                    identity already uses
                [--vault <1password vault>] [--op-account <1password account>]
                [--coauthor "Name <email>"] [--base-dir <dir>]
   doctor     verify the whole chain; non-zero exit on any failure

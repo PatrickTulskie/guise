@@ -237,6 +237,23 @@ expect_eq "token helper reads the file" \
 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
 expect_eq "doctor passes with a file-stored PAT" "$?" "0"
 
+# The store is settled only after the identity name is, so an unrelated
+# file-store default can't quietly route a new App's private key to disk.
+run_setup --pem "$SB/key.pem" >/dev/null 2>&1
+expect_eq "app setup alongside a file-store default exits 0" "$?" "0"
+expect_eq "new identity does not inherit the default's file store" \
+  "$(cfg identity.$APP_IDENT.keysource)" "op"
+expect "new identity's key went to 1Password" \
+  test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
+expect "new identity's key not written to disk" \
+  test ! -e "$HOME/.config/agent-id/keys/$APP_IDENT.pem"
+run_setup >/dev/null 2>&1
+expect_eq "re-running the app identity keeps 1Password" \
+  "$(cfg identity.$APP_IDENT.keysource)" "op"
+"$ROOT/bin/agent-id" setup --kind user </dev/null >/dev/null 2>&1
+expect_eq "re-running the user identity keeps its file store" \
+  "$(cfg identity.$USER_IDENT.keysource)" "file"
+
 # --- identity naming + configurable default ----------------------------------
 echo "identity naming and default:"
 new_sandbox
