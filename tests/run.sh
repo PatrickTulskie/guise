@@ -139,6 +139,15 @@ echo "doctor:"
 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
 expect_eq "doctor passes on a healthy install" "$?" "0"
 
+# A valid credential that reaches zero repos passes every other check and only
+# fails at clone time -- doctor has to catch it.
+FAKE_REPO_COUNT=0 "$ROOT/bin/agent-id" doctor > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails when the installation reaches no repos" "$?" "1"
+expect "the failure names the installation reachability check" \
+  grep -q "FAIL  installation reaches at least one repository" "$SB/doctor.out"
+"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+expect_eq "doctor passes again once the installation has a repo" "$?" "0"
+
 # --- file key store ----------------------------------------------------------
 echo "file key store:"
 new_sandbox
@@ -192,6 +201,13 @@ expect_eq "commits are authored by the account, not a bot" \
   "$(git -C "$repo" config --get user.name)" "patrick-agent"
 "$ROOT/bin/agent-id" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes for a user identity" "$?" "0"
+
+FAKE_REPO_COUNT=0 "$ROOT/bin/agent-id" doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails when the PAT reaches no repos" "$?" "1"
+expect "the failure names the token reachability check" \
+  grep -q "FAIL  token reaches at least one repository" "$SB/doctor.out"
+"$ROOT/bin/agent-id" doctor --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "doctor passes again once the PAT reaches a repo" "$?" "0"
 
 "$ROOT/bin/agent-id" setup --kind user </dev/null >/dev/null 2>&1
 expect_eq "re-run without --token-file reuses the stored token" "$?" "0"

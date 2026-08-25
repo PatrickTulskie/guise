@@ -58,6 +58,47 @@ agent-id setup --kind user --name <identity> --token-file /tmp/pat
 The git wiring and the identity's directory are untouched; only the stored
 secret changes.
 
+## Clone or push fails: "Write access to repository not granted"
+
+**Cause:** the credential is valid but reaches **zero repositories**. Everything
+else looks healthy — it authenticates, `GET /user` returns the right login,
+every other check passes — which is what makes this one confusing. `doctor`
+catches it with "token reaches at least one repository" (account identities) or
+"installation reaches at least one repository" (apps).
+
+For an account identity there are two causes, and they look identical from the
+agent's side:
+
+- **The token is scoped to the agent account itself.** A fine-grained PAT only
+  reaches repos owned by its *resource owner*, and the resource-owner picker
+  lists an org only if the account is a **member** of it. An account added as an
+  outside collaborator can't pick the org, so its token is self-scoped and
+  reaches nothing org-owned — write access on the repo doesn't change that.
+- **The token is waiting on org approval.** An org can require an owner to
+  approve fine-grained tokens; until that happens the token behaves as if the
+  org weren't there.
+
+Tell them apart on the token's own settings page — signed in as the agent
+account, Settings → Developer settings → Personal access tokens →
+Fine-grained tokens → the token. It names its resource owner, and shows an
+approval-pending banner while an owner still has to act. If the resource owner
+is the agent account, add the account to the org as a member and issue a fresh
+token (or use a classic PAT with `repo` scope — see the README). If it's
+pending, ask an owner to approve it.
+
+To check what a credential reaches without waiting for a clone (the token goes
+through a config file on a pipe, never `-H`, so it stays out of `ps`):
+
+```bash
+curl -s --config <(printf 'header = "Authorization: Bearer %s"\n' "$(agent-id token <identity>)") \
+  "https://api.github.com/user/repos?per_page=1"
+```
+
+An empty array `[]` is the failure. For an app identity, ask
+`https://api.github.com/installation/repositories` instead — `"total_count": 0`
+means the app is installed but has no repositories selected, fixed under the
+installation's settings, "Only select repositories".
+
 ## Setup refuses the token: "belongs to your own account"
 
 The PAT was issued while signed in as *you*, not as the agent account — which

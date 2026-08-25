@@ -20,6 +20,12 @@ case "$url" in
   */app)
     printf '{"id":%s,"slug":"%s"}' "${FAKE_APP_ID:?}" "${FAKE_SLUG:?}"
     ;;
+  */user/repos*)
+    if [[ "${FAKE_REPO_COUNT:-1}" == "0" ]]; then printf '[]'; else printf '[{"id":9001}]'; fi
+    ;;
+  */installation/repositories*)
+    printf '{"total_count":%s,"repositories":[]}' "${FAKE_REPO_COUNT:-1}"
+    ;;
   */user)
     if [[ -n "$hdr" ]]; then
       printf 'HTTP/2 200\r\ngithub-authentication-token-expiration: %s\r\n\r\n' \

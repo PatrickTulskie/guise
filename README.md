@@ -73,16 +73,29 @@ installation, say) reuses the stored key — just omit `--pem`.
 ## A separate GitHub account (instead of an app)
 
 An App's installation token only works on repos where the app is installed. A
-dedicated account can be invited as a collaborator anywhere, which is what you
-want for repos you don't control.
+dedicated account can be given access anywhere, which is what you want for repos
+you don't control — with one caveat about how its token gets scoped, in step 2.
 
 **1. Create the account** — a normal GitHub signup with its own email address.
 GitHub's terms allow one machine account per person alongside your own.
 
-**2. Issue a fine-grained PAT** *while signed in as that account* — Settings →
+**2. Give it access to the repos — as an org *member*, not an outside
+collaborator.** This ordering matters: a fine-grained PAT can only reach repos
+owned by the **resource owner** it was issued for, and the resource-owner picker
+lists an org only if the account is a member of it. An account added as an
+outside collaborator can therefore only issue a token scoped to *itself*, which
+reaches nothing the org owns — even with write access to the repo. Add it to a
+team; that costs a seat in a paid org.
+
+If you can't add it as a member, a **classic** PAT with the `repo` scope honors
+outside-collaborator access without membership or a seat. The tradeoff is
+reach: `repo` is all-or-nothing, so there's no per-repo selection.
+
+**3. Issue a fine-grained PAT** *while signed in as that account* — Settings →
 Developer settings → Personal access tokens → Fine-grained tokens:
 
-- Resource owner: the agent account (or an org that has granted it access)
+- Resource owner: whoever **owns** the repos the agent will work in — the org,
+  not the agent account, for anything org-owned
 - Repository access: only the repos the agent should work in
 - Repository permissions: Contents **R/W**, Pull requests **R/W**, Issues
   **R/W** (Metadata read comes along automatically)
@@ -101,8 +114,13 @@ Setup calls `GET /user` to discover the account's login and numeric user ID,
 **refuses the token if it belongs to your own account**, stores it (1Password
 by default, or `--store file`), and shreds `/tmp/pat`. The identity is named
 after the account, so commits under `~/agentic-code/<login>/` are authored by
-it, still with you as co-author. Give the account repo access the ordinary
-way: invite it as a collaborator or add it to a team.
+it, still with you as co-author.
+
+Org policy may require an owner to approve the token before it works, and a
+pending token is indistinguishable from a working one at the agent's end. Both
+that and a self-scoped token look fine to every other check and only surface as
+a 403 at clone time, so `doctor` verifies the token reaches at least one
+repository — see [troubleshooting](docs/troubleshooting.md).
 
 Re-running setup for that identity without `--token-file` reuses the stored
 token, so it's safe to re-run any time. Rotating is the same command with a

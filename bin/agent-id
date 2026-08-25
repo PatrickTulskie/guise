@@ -906,16 +906,42 @@ chk_bot_real() {
 }
 chk_ids_differ() { [[ "$(cfg_get "identity.$1.appid")" != "$(cfg_get "identity.$1.botuserid")" ]]; }
 
+# One authenticated call as the identity itself. Works for both kinds:
+# agent-id-token mints an installation token for apps and returns the PAT for
+# accounts. The credential goes through a config file on a pipe, never argv.
+api_as_identity() { # name path -> JSON on stdout
+  local t
+  t=$("$BIN_DIR/agent-id-token" "$1") || return 1
+  curl -sf --config <(printf 'header = "Authorization: Bearer %s"\n' "$t") \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${GITHUB_API}$2"
+}
+
 # The PAT still works AND still belongs to the account we recorded -- a swapped
 # token would otherwise silently change who the agent is.
 chk_user_real() {
-  local t json
-  t=$("$BIN_DIR/agent-id-token" "$1") || return 1
-  json=$(curl -sf --config <(printf 'header = "Authorization: Bearer %s"\n' "$t") \
-    -H "Accept: application/vnd.github+json" "${GITHUB_API}/user") || return 1
+  local json
+  json=$(api_as_identity "$1" /user) || return 1
   [[ "$(printf '%s' "$json" | jq -r '.id')" == "$(cfg_get "identity.$1.userid")" ]] \
     && [[ "$(lower "$(printf '%s' "$json" | jq -r '.login')")" \
           == "$(lower "$(cfg_get "identity.$1.login")")" ]]
+}
+
+# A credential can be entirely valid and still reach zero repositories, which
+# otherwise surfaces only as a 403 "Write access to repository not granted" at
+# clone time. For an account: a fine-grained PAT reaches only repos owned by its
+# resource owner, and the picker offers an org only if the account is a MEMBER,
+# so an outside collaborator can scope a token to itself and nothing else.
+# For an app: it may be installed on no repositories.
+chk_reaches_repo() {
+  local n
+  if [[ "$(identity_kind "$1")" == "user" ]]; then
+    n=$(api_as_identity "$1" "/user/repos?per_page=1" | jq -r 'length') || return 1
+  else
+    n=$(api_as_identity "$1" "/installation/repositories?per_page=1" | jq -r '.total_count') || return 1
+  fi
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 ))
 }
 
 # PATs expire; installation tokens are minted on demand. Warn while there is
@@ -1014,6 +1040,8 @@ cmd_doctor() {
             "issue a new PAT and re-run 'agent-id setup --kind user --name $name --token-file <path>'" chk_token_fresh "$name"
       check "agent account is not your own account" \
             "this identity holds a token for YOUR account -- issue one from the agent account" chk_not_human "$name"
+      check "token reaches at least one repository" \
+            "the PAT's resource owner is probably the agent account itself -- the org only appears in the picker if the account is an org MEMBER, not an outside collaborator (docs/troubleshooting.md)" chk_reaches_repo "$name"
       check "account email well-formed" \
             "re-run setup; email must be <userId>+<login>@users.noreply.github.com" chk_email_format "$name"
     else
@@ -1035,6 +1063,8 @@ cmd_doctor() {
             "slug or bot user id stale -- re-run setup to rediscover" chk_bot_real "$name"
       check "app id != bot user id (the classic mixup)" \
             "config has the app id in the email -- re-run setup" chk_ids_differ "$name"
+      check "installation reaches at least one repository" \
+            "the app is installed on no repos -- open its installation settings and pick some under 'Only select repositories'" chk_reaches_repo "$name"
     fi
     check "includeIf resolves identity inside $(basedir)/$name/" \
           "check the include block in ~/.gitconfig and $OWNED_GITCONFIG" chk_includeif "$name"
