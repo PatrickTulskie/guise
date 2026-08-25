@@ -26,7 +26,9 @@ lookup, or the repo isn't inside the agent directory at all.
 
 **Cause:** the App ID ended up in the commit email instead of the **bot user
 ID**. They are different numbers; the email must be
-`<botUserId>+<slug>[bot]@users.noreply.github.com`.
+`<botUserId>+<slug>[bot]@users.noreply.github.com`. For an account identity
+the equivalent is `<userId>+<login>@users.noreply.github.com`, where the
+numeric user ID comes from `GET /user`.
 
 Re-run `agent-id setup` — it rediscovers the bot user ID from
 `GET /users/<slug>%5Bbot%5D` and re-renders the conf. `doctor` has a dedicated
@@ -41,7 +43,36 @@ Fix in the UI: Settings → Rules → Rulesets → *(signature ruleset)* →
 Bypass list → Add → Apps → select the agent app → mode **Always**. This is
 scoped, named, and reversible.
 
+## The agent account's PAT expired, was revoked, or is about to
+
+`doctor` fails on "token valid and still @`<login>`" when the PAT no longer
+works, and on "token not expiring within 30 days" while there is still time.
+Both are fixed the same way — issue a fresh fine-grained PAT from the agent
+account and re-run setup for that identity:
+
+```bash
+pbpaste > /tmp/pat
+agent-id setup --kind user --name <identity> --token-file /tmp/pat
+```
+
+The git wiring and the identity's directory are untouched; only the stored
+secret changes.
+
+## Setup refuses the token: "belongs to your own account"
+
+The PAT was issued while signed in as *you*, not as the agent account — which
+would hand the agent your identity and your access. Sign in as the agent
+account (a separate browser profile is the least painful way) and issue the
+token there.
+
+If you're setting this up on a machine where `gh` isn't logged in, setup can't
+run that comparison and warns instead of refusing. Check `agent-id doctor`
+once `gh` is authenticated.
+
 ## Token expired mid-session
+
+This section is about app identities; account identities hold a standing PAT
+that only expires on the date GitHub stamped on it (see above).
 
 Installation tokens live 1 hour. The credential helper mints on demand and
 caches for 55 minutes, so a long session should never see an expired token —

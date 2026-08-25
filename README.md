@@ -5,7 +5,13 @@ commits land as `your-app[bot]` with you as co-author, instead of impersonating
 you. Everything is scoped to one directory — by default `~/agentic-code/` — and
 your own git identity is never touched.
 
-## One-time GitHub setup (two browser steps)
+That identity can be a **GitHub App bot** (below — the better default) or a
+**[separate GitHub account](#a-separate-github-account-instead-of-an-app)**.
+Both kinds can coexist, one per subdirectory.
+
+## Setting up a GitHub App bot
+
+### One-time GitHub setup (two browser steps)
 
 There's no API for these; everything after them is automated.
 
@@ -31,7 +37,7 @@ If a repo requires signed commits (a ruleset or branch protection), add the
 app to the ruleset's bypass list (Settings → Rules → Rulesets → Bypass list →
 Apps → mode Always), or the first push will be rejected.
 
-## Setup
+### Setup
 
 ```bash
 ./bin/agent-id setup --owner patricktulskie --app-id 12345 --pem ~/Downloads/your-app.pem
@@ -40,7 +46,8 @@ Apps → mode Always), or the first push will be rejected.
 What happens: the App's metadata (slug, installation ID, bot user ID) is
 discovered from the API, credentials go into 1Password, the PEM is shredded,
 helper binaries land in `~/.local/bin`, and a directory-scoped git identity is
-wired up for `~/agentic-code/default/`. Setup also drops an `AGENTS.md` (and a
+wired up for `~/agentic-code/patricktulskie-agent/` — named after the agent
+itself, not a generic slot. Setup also drops an `AGENTS.md` (and a
 `CLAUDE.md` importing it) into `~/agentic-code/` telling harnesses to use
 `agent-gh` — harnesses that stack context files up the directory tree pick it
 up for every repo underneath; it never overwrites your edits. It finishes by
@@ -51,23 +58,74 @@ unless you use `--store file`.
 
 ### Key storage: 1Password or a plain file
 
-By default the private key lives in 1Password and is read on demand, which
-means a locked vault blocks token minting. For agents that run unattended,
-pass `--store file` and the key is kept at `~/.config/agent-id/keys/<identity>.pem`
-(mode 600) instead — no 1Password involved at mint time. The key deliberately
-does *not* live in `~/agentic-code/`: agents roam that directory and must not
-be able to read or accidentally commit it.
+By default the secret — an App's private key, or an account's PAT — lives in
+1Password and is read on demand, which means a locked vault blocks the agent.
+For agents that run unattended, pass `--store file` and it is kept under
+`~/.config/agent-id/keys/` (mode 600) instead — no 1Password involved at use
+time. It deliberately does *not* live in `~/agentic-code/`: agents roam that
+directory and must not be able to read or accidentally commit it.
 
 ### The PEM is only needed once per app
 
 Adding another identity for an app you've already set up (a second
 installation, say) reuses the stored key — just omit `--pem`.
 
+## A separate GitHub account (instead of an app)
+
+An App's installation token only works on repos where the app is installed. A
+dedicated account can be invited as a collaborator anywhere, which is what you
+want for repos you don't control.
+
+**1. Create the account** — a normal GitHub signup with its own email address.
+GitHub's terms allow one machine account per person alongside your own.
+
+**2. Issue a fine-grained PAT** *while signed in as that account* — Settings →
+Developer settings → Personal access tokens → Fine-grained tokens:
+
+- Resource owner: the agent account (or an org that has granted it access)
+- Repository access: only the repos the agent should work in
+- Repository permissions: Contents **R/W**, Pull requests **R/W**, Issues
+  **R/W** (Metadata read comes along automatically)
+- Expiration: whatever you'll actually rotate — `doctor` starts failing 30
+  days out
+
+Then hand the token to setup as a file, never as a flag value (flags land in
+`ps` output and shell history):
+
+```bash
+pbpaste > /tmp/pat
+./bin/agent-id setup --kind user --token-file /tmp/pat
+```
+
+Setup calls `GET /user` to discover the account's login and numeric user ID,
+**refuses the token if it belongs to your own account**, stores it (1Password
+by default, or `--store file`), and shreds `/tmp/pat`. The identity is named
+after the account, so commits under `~/agentic-code/<login>/` are authored by
+it, still with you as co-author. Give the account repo access the ordinary
+way: invite it as a collaborator or add it to a team.
+
+Re-running setup for that identity without `--token-file` reuses the stored
+token, so it's safe to re-run any time. Rotating is the same command with a
+fresh `--token-file`.
+
+### Which one to use
+
+| | GitHub App bot | Separate account |
+|---|---|---|
+| Credential | 1-hour token, minted per use | long-lived PAT |
+| Repo access | only where the app is installed | collaborator anywhere |
+| Seat in a paid org | free | consumes one |
+| Rotation | automatic | manual, before the PAT expires |
+
+The app is the better default — nothing standing to steal, no rotation to
+remember. Reach for an account when the agent needs to work on repos you can't
+install an app on.
+
 ## Daily use
 
 ```bash
-agent-id clone patricktulskie/some-repo   # clones into ~/agentic-code/default/
-cd ~/agentic-code/default/some-repo
+agent-id clone patricktulskie/some-repo   # → ~/agentic-code/patricktulskie-agent/
+cd ~/agentic-code/patricktulskie-agent/some-repo
 # ... let the agent work; commits are authored by the bot, co-authored by you
 agent-gh pr create --fill                 # opens the PR as the bot
 ```
@@ -85,8 +143,35 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `agent-id setup` | provision an identity (idempotent) |
 | `agent-id doctor` | verify everything; non-zero exit on any failure |
 | `agent-id clone <owner/repo>` | clone where the identity applies |
-| `agent-id token` | print an installation token (debugging / harness use) |
+| `agent-id token` | print the identity's token (debugging / harness use) |
+| `agent-id default [name]` | show or change the identity used when none is named |
+| `agent-id rename <old> <new>` | rename an identity, its directory, and its key file |
 | `agent-id uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
+
+## Identity names and the default
+
+An identity is named after the agent it belongs to — the app slug for a bot,
+the account login for an account — and that name is the directory name, so
+clones land in `~/agentic-code/patricktulskie-agent/`. Pass `--name` to
+override.
+
+Commands that don't name an identity (`agent-id token`, `agent-id clone`,
+`agent-gh` run outside the base directory) use the default, recorded in
+`~/.config/agent-id/config` as `core.defaultidentity` and set to the first
+identity you provision:
+
+```bash
+agent-id default                        # print it
+agent-id default patricktulskie-agent   # change it
+```
+
+Renaming moves everything named after the identity — config section, key file,
+rendered git conf, and the directory with your clones in it. Existing installs
+made before this behavior are the reason it exists:
+
+```bash
+agent-id rename default patricktulskie-agent
+```
 
 ## Multiple identities
 
@@ -104,15 +189,24 @@ A different app entirely gets its own `--pem`:
 agent-id setup --owner patricktulskie --app-id 67890 --pem ~/Downloads/other.pem --name experiments
 ```
 
+Kinds mix freely — an app bot in one subdirectory, an account in another:
+
+```bash
+agent-id setup --kind user --token-file /tmp/pat --name oss
+agent-id clone someone/their-repo --name oss     # → ~/agentic-code/oss/
+```
+
 ## Contributing to repos the app isn't installed on
 
 An installation token only works on repos where the app is installed. For open
 source work that means one of:
 
 - the maintainer installs your agent app on their repo/org (the "Any account"
-  setting above makes this possible), or
+  setting above makes this possible),
 - you fork, install the app on your own fork, push there as the bot, and open
-  the PR from the fork.
+  the PR from the fork, or
+- you use a [separate account](#a-separate-github-account-instead-of-an-app),
+  which needs no installation on either side.
 
 ## When something's off
 

@@ -2,9 +2,11 @@
 # Fake GitHub API. Matches on the URL, logs every call to $CURL_LOG.
 set -euo pipefail
 
-url=""
+url="" hdr="" prev=""
 for a in "$@"; do
+  case "$prev" in -D) hdr="$a" ;; esac
   case "$a" in https://*) url="$a" ;; esac
+  prev="$a"
 done
 [[ -n "${CURL_LOG:-}" ]] && echo "$url" >> "$CURL_LOG"
 
@@ -17,6 +19,13 @@ case "$url" in
     ;;
   */app)
     printf '{"id":%s,"slug":"%s"}' "${FAKE_APP_ID:?}" "${FAKE_SLUG:?}"
+    ;;
+  */user)
+    if [[ -n "$hdr" ]]; then
+      printf 'HTTP/2 200\r\ngithub-authentication-token-expiration: %s\r\n\r\n' \
+        "${FAKE_TOKEN_EXPIRES:-2099-01-01 00:00:00 UTC}" > "$hdr"
+    fi
+    printf '{"id":%s,"login":"%s"}' "${FAKE_USER_ID:?}" "${FAKE_LOGIN:?}"
     ;;
   */users/*)
     printf '{"id":%s}' "${FAKE_BOT_ID:?}"

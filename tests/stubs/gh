@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Fake gh. `gh api user` answers with $FAKE_GH_LOGIN, or fails like a logged-out
+# gh when it is unset -- which is what exercises the tolerant path in setup.
+set -euo pipefail
+
+if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
+  [[ -n "${FAKE_GH_LOGIN:-}" ]] || { echo "gh stub: not logged in" >&2; exit 1; }
+  printf '%s\n' "$FAKE_GH_LOGIN"
+  exit 0
+fi
+echo "gh stub: unsupported: $*" >&2
+exit 1
