@@ -183,6 +183,9 @@ agent-id default                        # print it
 agent-id default patricktulskie-agent   # change it
 ```
 
+`setup --default` claims it at provisioning time instead, for when you already
+know the new identity should be the one commands fall back to.
+
 Renaming moves everything named after the identity — config section, key file,
 rendered git conf, and the directory with your clones in it. Existing installs
 made before this behavior are the reason it exists:

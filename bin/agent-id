@@ -543,11 +543,13 @@ remove_include_block() {
 
 cmd_setup() {
   local owner="" app_id="" pem="" name="" vault="Private" coauthor="" base="" op_account="" store=""
-  local kind="" login="" token_file=""
+  local kind="" login="" token_file="" make_default=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)       kind="$2"; shift 2 ;;
-      --owner)      owner="$2"; shift 2 ;;
+      # --org is the work checkout's name for the same flag; accept both so one
+      # habit works in either repo.
+      --owner|--org) owner="$2"; shift 2 ;;
       --app-id)     app_id="$2"; shift 2 ;;
       --pem)        pem="$2"; shift 2 ;;
       --login)      login="$2"; shift 2 ;;
@@ -558,6 +560,8 @@ cmd_setup() {
       --op-account) op_account="$2"; shift 2 ;;
       --coauthor)   coauthor="$2"; shift 2 ;;
       --base-dir)   base="$2"; shift 2 ;;
+      --default)    make_default=1; shift ;;
+      --token)      die "there is no --token flag on purpose -- argv lands in ps output and shell history; use --token-file, or let setup prompt" ;;
       *) die "setup: unknown flag '$1'" ;;
     esac
   done
@@ -845,8 +849,13 @@ cmd_setup() {
     fi
     cfg_unset "identity.$name.opitem"
   fi
-  # The first identity provisioned becomes the default; later ones don't steal it.
-  cfg_get core.defaultidentity >/dev/null || cfg_set core.defaultidentity "$name"
+  # The first identity provisioned becomes the default; later ones don't steal
+  # it unless asked to.
+  if [[ -n "$make_default" ]]; then
+    cfg_set core.defaultidentity "$name"
+  else
+    cfg_get core.defaultidentity >/dev/null || cfg_set core.defaultidentity "$name"
+  fi
 
   install_binaries
   install_hook
@@ -858,6 +867,7 @@ cmd_setup() {
 
   say "==> setup complete for identity '$name'"
   say "    agent clones go in $base/$name/ (use 'agent-id clone <owner/repo>')"
+  say "    default identity: $(default_identity)"
   say ""
   cmd_doctor --name "$name"
 }
@@ -1304,6 +1314,7 @@ usage: agent-id <command> [flags]
                setup reuses a stored token or prompts (never via argv)
              common:
                [--name <identity>]  default: the app slug / account login
+               [--default]          make this the default identity
                [--store <op|file>]  op: secret in 1Password (default for a
                                         new identity)
                                     file: secret on disk, no 1Password

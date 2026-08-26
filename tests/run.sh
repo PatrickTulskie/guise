@@ -304,6 +304,9 @@ expect "--name still wins over the derived name" test -d "$HOME/agentic-code/exp
 expect_eq "a later identity does not steal the default" "$(cfg core.defaultidentity)" "test-agent"
 "$ROOT/bin/agent-id" default explicit >/dev/null 2>&1
 expect_eq "default can be repointed" "$(cfg core.defaultidentity)" "explicit"
+openssl genrsa -out "$SB/key3.pem" 2048 2>/dev/null
+run_setup --store file --name claimed --pem "$SB/key3.pem" --default >/dev/null 2>&1
+expect_eq "--default claims the default identity" "$(cfg core.defaultidentity)" "claimed"
 "$ROOT/bin/agent-id" default nonesuch >/dev/null 2>&1
 expect_eq "default rejects an unknown identity" "$?" "1"
 
