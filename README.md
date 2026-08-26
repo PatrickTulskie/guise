@@ -215,9 +215,10 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `agent-id setup` | provision an identity (idempotent) |
 | `agent-id doctor` | verify everything; non-zero exit on any failure |
 | `agent-id clone <owner/repo>` | clone where the identity applies |
+| `agent-id update` | reinstall helpers, hook, and rendered confs from this copy of the script |
 | `agent-id token` | print the identity's token (debugging / harness use) |
 | `agent-id default [name]` | show or change the identity used when none is named |
-| `agent-id rename <old> <new>` | rename an identity, its directory, and its key file |
+| `agent-id rename <old> <new>` | rename an identity, its directory, and its key files |
 | `agent-id uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
 
 ## Identity names and the default
@@ -270,6 +271,28 @@ Kinds mix freely — an app bot in one subdirectory, an account in another:
 agent-id setup --kind user --token-file /tmp/pat --name oss
 agent-id clone someone/their-repo --name oss     # → ~/agentic-code/oss/
 ```
+
+## Picking up a new version
+
+The helper binaries, the commit hook, and the git config template live inside
+`bin/agent-id` and are written out at install time, so a newer script in this
+repo does nothing until you install it:
+
+```bash
+git pull && ./bin/agent-id update
+```
+
+`update` rewrites the helpers, the hook, and **every** identity's rendered conf
+from the script you ran it with. It reads no credential, makes no API call, and
+does not touch `~/.config/agent-id/config` or anything stored in 1Password — so
+it works with the vault locked and the network down. Follow it with
+`agent-id doctor` when you want the whole chain verified.
+
+Re-running `setup` also picks up a new version, but it does more than an update
+needs: it reads the identity's stored secret and calls GitHub to rediscover
+metadata, and it re-renders only the identity it ran for. Use `setup` when the
+credential or the GitHub-side metadata changed; use `update` when only the
+script did.
 
 ## Contributing to repos the app isn't installed on
 

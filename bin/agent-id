@@ -4,7 +4,7 @@
 # An identity is either a GitHub App installation (a bot) or a separate
 # GitHub account holding a PAT.
 #
-# Subcommands: setup | doctor | uninstall | clone | token
+# Subcommands: setup | doctor | uninstall | clone | token | update
 #
 # Self-contained: the helper binaries, git config template, and commit hook
 # are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
@@ -1418,6 +1418,39 @@ cmd_clone() {
 }
 
 # ---------------------------------------------------------------------------
+# update -- reinstall what this script embeds, and nothing else
+# ---------------------------------------------------------------------------
+
+# Everything rewritten here comes from heredocs in this file plus the existing
+# config, so update reads no credential and calls no API. That is the point:
+# picking up a new version must work with the 1Password vault locked and the
+# network down. `setup` remains the repair action for anything that needs the
+# credential or fresh GitHub metadata.
+cmd_update() {
+  [[ $# -eq 0 ]] || die "update takes no arguments"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+  local names name count=0
+  names=$(list_identities)
+  [[ -n "$names" ]] || die "no identities in config -- run 'agent-id setup'"
+
+  install_binaries
+  install_hook
+  say "reinstalled $HELPERS and the commit hook"
+
+  # Every identity, not just the default: a bare `setup` re-renders only the one
+  # it ran for, which leaves the others on an old template.
+  for name in $names; do
+    render_identity_conf "$name"
+    count=$((count + 1))
+  done
+  regen_owned_gitconfig
+  ensure_include_block
+  say "re-rendered $count identity conf(s) in $RENDER_DIR"
+  say ""
+  say "config and stored secrets untouched -- run 'agent-id doctor' to verify the chain"
+}
+
+# ---------------------------------------------------------------------------
 # token
 # ---------------------------------------------------------------------------
 
@@ -1544,6 +1577,8 @@ usage: agent-id <command> [flags]
   uninstall  remove all wiring; leaves keys + clones alone  [-y]
   clone      clone a repo into the agent directory so the identity applies
              <owner/repo | url> [--name <identity>]
+  update     reinstall the helpers, hook, and rendered confs from this copy
+             of the script; no credential read, no network, config untouched
   token      print the identity's token  [identity]
   default    show the identity used when none is named, or set it  [<name>]
   rename     rename an identity, its directory, and its key files
@@ -1556,6 +1591,7 @@ case "${1:-}" in
   doctor)    shift; cmd_doctor "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   clone)     shift; cmd_clone "$@" ;;
+  update)    shift; cmd_update "$@" ;;
   token)     shift; cmd_token "$@" ;;
   default)   shift; cmd_default "$@" ;;
   rename)    shift; cmd_rename "$@" ;;

@@ -497,6 +497,98 @@ expect "uninstall leaves the signing key alone" \
 expect "and names the public half still on the account" \
   grep -q 'public signing key on the agent account' "$SB/uninstall.out"
 
+# --- update ------------------------------------------------------------------
+# Picking up a new version must work with the vault locked and the network down,
+# which is the whole reason this exists instead of "just re-run setup".
+echo "update:"
+new_sandbox
+export FAKE_GH_LOGIN=PatrickTulskie
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --sign --token-file "$SB/pat.txt" >/dev/null 2>&1
+awk '{print $1" "$2}' "$HOME/.config/agent-id/keys/$USER_IDENT.signing.pub" \
+  >> "$SIGNING_KEYS_FILE"
+
+confdir="$HOME/.config/agent-id/git"
+cfgfile="$HOME/.config/agent-id/config"
+cfg_before=$(shasum < "$cfgfile")
+# Clobber everything update owns; leave everything it must not touch alone.
+echo broken > "$HOME/.local/bin/agent-gh"
+echo broken > "$HOME/.local/bin/agent-id-token"
+echo broken > "$confdir/agent-hooks/prepare-commit-msg"
+echo broken > "$confdir/$APP_IDENT.conf"
+echo broken > "$confdir/$USER_IDENT.conf"
+# The wiring too, or update could stop calling regen_owned_gitconfig and
+# ensure_include_block and every assertion below would still pass. The alias
+# stands in for whatever else the engineer keeps in ~/.gitconfig.
+echo "# clobbered" > "$HOME/.config/agent-id/gitconfig"
+cat > "$HOME/.gitconfig" <<'GITCONFIG'
+[user]
+	name = Human
+	email = human@example.com
+[commit]
+	gpgsign = true
+[init]
+	defaultBranch = main
+[alias]
+	lg = log --oneline
+GITCONFIG
+: > "$CURL_LOG"
+OP_FAKE_FORBID=1 agent update >/dev/null 2>&1
+expect_eq "update exits 0 with 1Password refusing every call" "$?" "0"
+expect_eq "and having made no API calls at all" "$(grep -c . "$CURL_LOG")" "0"
+expect "agent-gh reinstalled" grep -q GH_TOKEN "$HOME/.local/bin/agent-gh"
+expect "token helper reinstalled" grep -q 'agent-id-token' "$HOME/.local/bin/agent-id-token"
+expect "commit hook reinstalled" grep -q 'Co-authored-by' "$confdir/agent-hooks/prepare-commit-msg"
+expect_eq "config left byte-identical" "$(shasum < "$cfgfile")" "$cfg_before"
+# A bare `setup` re-renders only the identity it ran for; update does all of them.
+expect "app identity conf re-rendered" \
+  grep -q '3333+test-agent\[bot\]@users\.noreply\.github\.com' "$confdir/$APP_IDENT.conf"
+expect "user identity conf re-rendered too" \
+  grep -q "4444+$USER_IDENT@users\.noreply\.github\.com" "$confdir/$USER_IDENT.conf"
+expect "a signing identity still signs afterwards" \
+  grep -q 'gpgsign = true' "$confdir/$USER_IDENT.conf"
+owned="$HOME/.config/agent-id/gitconfig"
+expect_eq "owned gitconfig regenerated, one includeIf per identity" \
+  "$(grep -c includeIf "$owned")" "2"
+# A count alone passes when both entries name the same identity, so pair each
+# gitdir with the conf it has to load.
+for id in "$APP_IDENT" "$USER_IDENT"; do
+  expect_eq "the includeIf for '$id' loads its own conf" \
+    "$(git config -f "$owned" --get "includeIf.gitdir:~/agentic-code/$id/.path" || echo MISSING)" \
+    "git/$id.conf"
+done
+expect_eq "the managed include block is back in ~/.gitconfig" \
+  "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+expect "unrelated global config survived" grep -q 'lg = log --oneline' "$HOME/.gitconfig"
+expect_eq "and the human's own identity with it" \
+  "$(git -C "$SB" config --get user.email)" "human@example.com"
+wirerepo="$HOME/agentic-code/$APP_IDENT/rewired"
+git init -q "$wirerepo"
+expect_eq "the identity resolves inside its directory again" \
+  "$(git -C "$wirerepo" config --get user.email)" \
+  "3333+test-agent[bot]@users.noreply.github.com"
+uprepo="$HOME/agentic-code/$USER_IDENT/afterupdate"
+git init -q "$uprepo"
+( cd "$uprepo" && echo x > f && git add f && git commit -q -m "after update" )
+expect_eq "and commits made after an update still verify" \
+  "$(git -C "$uprepo" log -1 --format='%G?')" "G"
+
+# The installed copy is the thing being updated, so prove it actually moves.
+echo '# stale' >> "$HOME/.local/bin/agent-id"
+agent update >/dev/null 2>&1
+expect "the installed script is replaced by the one being run" \
+  cmp -s "$ROOT/bin/agent-id" "$HOME/.local/bin/agent-id"
+snap_up=$(snapshot)
+agent update >/dev/null 2>&1
+expect_eq "a second update changes nothing" "$(snapshot)" "$snap_up"
+OP_FAKE_FORBID=1 agent doctor >/dev/null 2>&1
+expect_eq "doctor still passes after an update" "$?" "0"
+
+expect_fail "update refuses arguments" agent update --name "$APP_IDENT"
+rm -f "$cfgfile"
+expect_fail "update refuses when there is no config" agent update
+
 # --- uninstall restores prior state ------------------------------------------
 echo "uninstall:"
 new_sandbox
