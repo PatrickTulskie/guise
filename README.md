@@ -1,5 +1,29 @@
 # agent-id
 
+## For Humans
+
+When you develop with agents, it is worth giving the agent a limited subset of
+your permissions and making it clear that the agent wrote the code and you are
+reviewing and pushing it. An agent identity lets you move quicker while still
+leaving an honest trail. This framework sets that up alongside your regular
+git configuration, without disturbing it.
+
+If you're a human, you don't have to read the rest of this README. Clone the
+repo, hand it to your harness of choice, and tell it to set up your machine. You
+need the GitHub side first — an account or app for the agent, and a credential
+issued from it; that's the only part nobody can automate for you. After that it
+should be as simple as:
+
+```bash
+./bin/agent-id setup --kind user --login your-agent-account
+```
+
+`setup` prompts for the PAT — there is deliberately no `--token` flag, since
+argv is visible in `ps`. Add `--sign` if the repos you work in require signed
+commits; see [Signed commits](#signed-commits).
+
+## Introduction
+
 Gives your coding agents (Claude Code, Cursor) their own GitHub identity. Agent
 commits land as `your-app[bot]` with you as co-author, instead of impersonating
 you. Everything is scoped to one directory — by default `~/agentic-code/` — and
