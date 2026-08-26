@@ -31,8 +31,24 @@ say()  { printf '%s\n' "$*"; }
 warn() { printf 'agent-id: %s\n' "$*" >&2; }
 die()  { printf 'agent-id: error: %s\n' "$*" >&2; exit 1; }
 
-cfg_get() { git config -f "$CONFIG_FILE" --get "$1" 2>/dev/null; }
-cfg_set() { git config -f "$CONFIG_FILE" "$1" "$2"; }
+cfg_get()   { git config -f "$CONFIG_FILE" --get "$1" 2>/dev/null; }
+cfg_set()   { git config -f "$CONFIG_FILE" "$1" "$2"; }
+cfg_unset() { git config -f "$CONFIG_FILE" --unset "$1" 2>/dev/null || true; }
+
+# Remove a secret's source file once the secret is stored somewhere durable.
+shred_file() {
+  if command -v shred >/dev/null; then
+    shred -u "$1"
+  else
+    rm -f "$1"
+    warn "shred not available -- $1 removed with rm (contents may persist on disk)"
+  fi
+}
+
+# GNU first: BSD stat rejects -c with a usage error and no stdout, while GNU
+# stat -f prints filesystem info to stdout *before* failing, so a BSD-first
+# fallback would concatenate garbage onto the real answer on Linux.
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 
 # ~-form for values written into git config files
 display_path() {
@@ -785,12 +801,7 @@ cmd_setup() {
     local src="$pem"
     [[ "$kind" == "user" ]] && src="$token_file"
     if [[ ! "$src" -ef "$secret_path" ]]; then
-      if command -v shred >/dev/null; then
-        shred -u "$src"
-      else
-        rm -f "$src"
-        warn "shred not available -- source file removed with rm (contents may persist on disk)"
-      fi
+      shred_file "$src"
       say "    secret stored and the file it came from shredded"
     fi
   fi
@@ -812,7 +823,7 @@ cmd_setup() {
     if [[ -n "$expires" ]]; then
       cfg_set "identity.$name.tokenexpires" "$expires"
     else
-      git config -f "$CONFIG_FILE" --unset "identity.$name.tokenexpires" 2>/dev/null || true
+      cfg_unset "identity.$name.tokenexpires"
     fi
   else
     cfg_set "identity.$name.owner" "$owner"
@@ -824,15 +835,15 @@ cmd_setup() {
   cfg_set "identity.$name.keysource" "$store"
   if [[ "$store" == "op" ]]; then
     cfg_set "identity.$name.opitem" "$op_item"
-    git config -f "$CONFIG_FILE" --unset "identity.$name.keyfile" 2>/dev/null || true
-    git config -f "$CONFIG_FILE" --unset "identity.$name.tokenfile" 2>/dev/null || true
+    cfg_unset "identity.$name.keyfile"
+    cfg_unset "identity.$name.tokenfile"
   else
     if [[ "$kind" == "user" ]]; then
       cfg_set "identity.$name.tokenfile" "$secret_path"
     else
       cfg_set "identity.$name.keyfile" "$secret_path"
     fi
-    git config -f "$CONFIG_FILE" --unset "identity.$name.opitem" 2>/dev/null || true
+    cfg_unset "identity.$name.opitem"
   fi
   # The first identity provisioned becomes the default; later ones don't steal it.
   cfg_get core.defaultidentity >/dev/null || cfg_set core.defaultidentity "$name"
@@ -888,19 +899,17 @@ chk_op() { # name field
   fi
 }
 chk_keyfile() {
-  local f mode
+  local f
   f=$(cfg_get "identity.$1.keyfile") || return 1
   [[ -f "$f" ]] || return 1
-  mode=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
-  [[ "$mode" == "600" ]] || return 1
+  [[ "$(file_mode "$f")" == "600" ]] || return 1
   openssl pkey -in "$f" -noout 2>/dev/null
 }
 chk_tokenfile() {
-  local f mode
+  local f
   f=$(cfg_get "identity.$1.tokenfile") || return 1
   [[ -s "$f" ]] || return 1
-  mode=$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null)
-  [[ "$mode" == "600" ]]
+  [[ "$(file_mode "$f")" == "600" ]]
 }
 chk_token() {
   local t re='^ghs_'
