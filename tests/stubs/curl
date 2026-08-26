@@ -33,6 +33,16 @@ case "$url" in
     fi
     printf '{"id":%s,"login":"%s"}' "${FAKE_USER_ID:?}" "${FAKE_LOGIN:?}"
     ;;
+  */users/*/ssh_signing_keys)
+    # The account's signing keys page, as anyone can read it. Tests append to
+    # $SIGNING_KEYS_FILE to stand in for a human pasting a key into the form.
+    if [[ -s "${SIGNING_KEYS_FILE:-/dev/null}" ]]; then
+      jq -R -s 'split("\n") | map(select(length > 0)) | to_entries
+                | map({id: .key, key: .value})' "$SIGNING_KEYS_FILE"
+    else
+      printf '[]'
+    fi
+    ;;
   */users/*)
     printf '{"id":%s}' "${FAKE_BOT_ID:?}"
     ;;

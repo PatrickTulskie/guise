@@ -132,12 +132,66 @@ fresh `--token-file`.
 |---|---|---|
 | Credential | 1-hour token, minted per use | long-lived PAT |
 | Repo access | only where the app is installed | collaborator anywhere |
+| Signed commits | can't sign; needs a ruleset bypass | `--sign`, own key |
 | Seat in a paid org | free | consumes one |
 | Rotation | automatic | manual, before the PAT expires |
 
 The app is the better default — nothing standing to steal, no rotation to
 remember. Reach for an account when the agent needs to work on repos you can't
 install an app on.
+
+## Signed commits
+
+Repos and orgs increasingly require signed commits. A separate GitHub account is
+a real account, so it can hold a signing key of its own:
+
+```bash
+agent-id setup --kind user --login your-agent-account --sign
+```
+
+That generates an ed25519 key at `~/.config/agent-id/keys/<identity>.signing`
+(mode 600, no passphrase, never leaves the machine), switches the scoped config
+to `gpg.format = ssh` with `commit.gpgsign = true`, writes an allowed-signers
+file so `git log --show-signature` verifies locally, and prints the public half.
+
+One step is left, and it is manual. Signed in **as the agent account**, go to
+github.com/settings/ssh/new, choose **Key type: Signing Key** — not
+Authentication Key, they are separate lists — and paste the key `setup` printed.
+Until you do, commits still sign but GitHub shows them Unverified, and `doctor`
+says so.
+
+### Why that step is manual
+
+Registering a signing key needs an account-level permission that a fine-grained
+PAT cannot carry, so there is no credential that could do it for you. That also
+means the whole signing path touches no secret at all: the one GitHub call
+`agent-id` makes here is an unauthenticated read of the account's public key
+list, to check whether the key is already up there.
+
+The key itself is deliberately the one thing not kept in 1Password. It grants
+nothing, it never authenticates anything (`namespaces="git"` limits it to
+commits and tags), and replacing it costs one command — so syncing it would only
+widen where it can leak from.
+
+### Rotating and turning it off
+
+Delete the key and re-run setup to mint a fresh one; re-running with the key
+still in place reuses it, which is what you want, since the old public half is
+the one registered on the account:
+
+```bash
+rm ~/.config/agent-id/keys/<identity>.signing*
+agent-id setup --kind user --login your-agent-account --sign
+```
+
+`--no-sign` turns it back off, shreds the local private half, and reminds you to
+remove the public one from the account. Signing is otherwise sticky: a bare
+re-run of `setup` keeps doing whatever that identity already does.
+
+An **App** identity cannot sign — a `your-app[bot]` user has no settings page to
+hold a key — and `--sign` is refused for one. Put the app on the signature
+ruleset's bypass list instead; see
+[docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Daily use
 

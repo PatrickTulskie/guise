@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shell test harness (bats not assumed). Runs everything in a sandboxed $HOME
-# with stubbed `op` and `curl`; git, openssl, jq, shred are the real ones.
+# with stubbed `op`, `curl`, and `gh`; git, openssl, jq, shred are the real ones.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,6 +14,7 @@ expect_eq() {
   local desc="$1" got="$2" want="$3"
   if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc (got '$got', want '$want')"; fi
 }
+expect_fail() { local desc="$1"; shift; if "$@" >/dev/null 2>&1; then bad "$desc"; else ok "$desc"; fi }
 
 new_sandbox() {
   SB=$(mktemp -d)
@@ -22,6 +23,8 @@ new_sandbox() {
   export XDG_CACHE_HOME="$HOME/.cache"
   export OP_FAKE_DIR="$SB/op"; mkdir -p "$OP_FAKE_DIR"
   export CURL_LOG="$SB/curl.log"; : > "$CURL_LOG"
+  # What the fake GitHub has on the agent account's SSH signing keys page.
+  export SIGNING_KEYS_FILE="$SB/signing_keys"; : > "$SIGNING_KEYS_FILE"
   export PATH="$ROOT/tests/stubs:$REAL_PATH"
   export FAKE_APP_ID=1111 FAKE_SLUG=test-agent FAKE_OWNER=PatrickTulskie FAKE_INSTALL_ID=2222 FAKE_BOT_ID=3333
   export FAKE_USER_ID=4444 FAKE_LOGIN=patrick-agent
@@ -40,6 +43,15 @@ run_setup() {
   "$ROOT/bin/agent-id" setup --owner patricktulskie --app-id 1111 \
     --op-account my.1password.com "$@" </dev/null
 }
+
+run_setup_user() {
+  "$ROOT/bin/agent-id" setup --kind user \
+    --op-account my.1password.com "$@" </dev/null
+}
+
+agent() { "$ROOT/bin/agent-id" "$@" </dev/null; }
+
+new_token_file() { printf 'github_pat_stub123\n' > "$1"; }
 
 cfg() { git config -f "$HOME/.config/agent-id/config" --get "$1"; }
 
@@ -336,6 +348,154 @@ expect_eq "doctor passes after rename" "$?" "0"
 expect_eq "rename refuses a name already in use" "$?" "1"
 "$ROOT/bin/agent-id" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
+
+# --- commit signing ----------------------------------------------------------
+# A separate GitHub account is a real account, so it can hold an SSH signing key
+# and GitHub can mark its commits Verified. App identities cannot: there is no
+# settings page behind a foo[bot] user.
+echo "commit signing (user identity):"
+new_sandbox
+export FAKE_GH_LOGIN=PatrickTulskie
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --sign --token-file "$SB/pat.txt" >"$SB/sign.out" 2>&1
+# Non-zero, and correctly so: the key is not on the account yet, which is a real
+# gap doctor has to report. Putting it there is a browser step.
+expect_eq "setup ends non-zero while the key is not on the account" "$?" "1"
+signkey="$HOME/.config/agent-id/keys/$USER_IDENT.signing"
+expect_eq "signing recorded in config" "$(cfg identity.$USER_IDENT.signing)" "ssh"
+expect_eq "signingkey points into the keys dir" "$(cfg identity.$USER_IDENT.signingkey)" "$signkey"
+expect "private half generated" test -f "$signkey"
+expect "public half written alongside" test -f "$signkey.pub"
+expect_eq "private half is mode 600" \
+  "$(stat -c '%a' "$signkey" 2>/dev/null || stat -f '%Lp' "$signkey")" "600"
+expect "an ed25519 key" grep -q '^ssh-ed25519 ' "$signkey.pub"
+# Agents roam the workspace; a signing key there is one they could commit.
+expect_eq "nothing signing-shaped under the agent workspace" \
+  "$(find "$HOME/agentic-code" -name '*.signing*' | wc -l | tr -d ' ')" "0"
+
+# Registering a signing key needs an account-level permission no fine-grained PAT
+# can carry, so setup asks rather than tries -- and the whole signing path stays
+# credential-free.
+expect "setup prints the public key to paste" grep -qF \
+  "$(awk '{print $1" "$2}' "$signkey.pub")" "$SB/sign.out"
+expect "and names the Signing Key dropdown, not the authentication one" \
+  grep -q 'Key type: Signing Key' "$SB/sign.out"
+expect_eq "nothing was ever posted to the key API" \
+  "$(grep -c '/user/ssh_signing_keys' "$CURL_LOG")" "0"
+expect_eq "the registration check is the only failure" \
+  "$(agent doctor 2>&1 | grep -c '^  FAIL')" "1"
+expect_eq "and it names the account" \
+  "$(agent doctor 2>&1 | grep -c "FAIL  signing key registered on @$USER_IDENT")" "1"
+expect_eq "while commits already sign and verify locally" \
+  "$(agent doctor 2>&1 | grep -c 'ok    commits sign and verify in agent scope')" "1"
+
+signrepo="$HOME/agentic-code/$USER_IDENT/signed"
+git init -q "$signrepo"
+expect_eq "gpgsign on inside scope" "$(git -C "$signrepo" config --get commit.gpgsign)" "true"
+expect_eq "tags sign too" "$(git -C "$signrepo" config --get tag.gpgsign)" "true"
+expect_eq "ssh signature format inside scope" "$(git -C "$signrepo" config --get gpg.format)" "ssh"
+expect_eq "signing key resolves inside scope" \
+  "$(git -C "$signrepo" config --get user.signingkey)" "$signkey"
+expect_eq "human gpgsign untouched outside scope" \
+  "$(git -C "$SB" config --get commit.gpgsign)" "true"
+expect_fail "and no ssh format leaked into the human's config" \
+  git -C "$SB" config --get gpg.format
+( cd "$signrepo" && echo x > f && git add f && git commit -q -m "signed commit" )
+expect_eq "the commit carries a good signature" \
+  "$(git -C "$signrepo" log -1 --format='%G?')" "G"
+expect "allowed signers file names the agent's commit email" \
+  grep -q "^4444+$USER_IDENT@users\.noreply\.github\.com namespaces=\"git\" ssh-ed25519 " \
+  "$HOME/.config/agent-id/git/$USER_IDENT.allowed_signers"
+
+# Paste the key into the account's signing keys page, the way a human does.
+echo "once the key is on the account:"
+awk '{print $1" "$2}' "$signkey.pub" >> "$SIGNING_KEYS_FILE"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes" "$?" "0"
+run_setup_user --login "$USER_IDENT" >"$SB/sign2.out" 2>&1
+expect_eq "a bare re-run exits 0 now" "$?" "0"
+expect "and says the key is already registered" \
+  grep -q "already registered on @$USER_IDENT" "$SB/sign2.out"
+expect_eq "and keeps signing on" "$(cfg identity.$USER_IDENT.signing)" "ssh"
+# Re-running setup is the advertised repair action: it must not mint a new key,
+# since the old public half is the one registered on the account.
+fp=$(ssh-keygen -lf "$signkey.pub" | awk '{print $2}')
+run_setup_user --login "$USER_IDENT" >/dev/null 2>&1
+expect_eq "and reuses the same key" "$(ssh-keygen -lf "$signkey.pub" | awk '{print $2}')" "$fp"
+
+# Signing locally and being Verified on GitHub fail separately, and the checks
+# have to tell them apart.
+: > "$SIGNING_KEYS_FILE"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor fails again if the key is removed from the account" "$?" "1"
+awk '{print $1" "$2}' "$signkey.pub" >> "$SIGNING_KEYS_FILE"
+
+echo "turning signing back off:"
+new_token_file "$SB/pat2.txt"
+run_setup_user --name gated --store file --sign --token-file "$SB/pat2.txt" >/dev/null 2>&1
+expect "a second signing identity got its own key" \
+  test -f "$HOME/.config/agent-id/keys/gated.signing"
+expect_eq "with signing on" "$(cfg identity.gated.signing)" "ssh"
+run_setup_user --name gated --no-sign >/dev/null 2>&1
+expect_eq "--no-sign exits 0" "$?" "0"
+expect_fail "signing unset in config" cfg identity.gated.signing
+expect_fail "signingkey unset too" cfg identity.gated.signingkey
+expect "local private key shredded" test ! -e "$HOME/.config/agent-id/keys/gated.signing"
+expect "public half removed with it" test ! -e "$HOME/.config/agent-id/keys/gated.signing.pub"
+expect "allowed signers file removed" test ! -e "$HOME/.config/agent-id/git/gated.allowed_signers"
+gatedrepo="$HOME/agentic-code/gated/scoped"
+git init -q "$gatedrepo"
+expect_eq "gpgsign back off inside scope" \
+  "$(git -C "$gatedrepo" config --get commit.gpgsign)" "false"
+expect_fail "no ssh signing format left behind" git -C "$gatedrepo" config --get gpg.format
+agent doctor --name gated >/dev/null 2>&1
+expect_eq "doctor passes with signing off again" "$?" "0"
+
+# Shredding the key before the config stops pointing at it would leave a conf
+# that still signs, naming a key that is gone. Force a die after that point --
+# the token comes from a file, but storing it needs 1Password.
+echo "a --no-sign that dies partway:"
+new_token_file "$SB/pat3.txt"
+run_setup_user --name opsign --sign --token-file "$SB/pat3.txt" >/dev/null 2>&1
+opkey="$HOME/.config/agent-id/keys/opsign.signing"
+expect "an op-store identity gets a signing key too" test -f "$opkey"
+new_token_file "$SB/pat4.txt"
+OP_FAKE_FORBID=1 run_setup_user --name opsign --no-sign \
+  --token-file "$SB/pat4.txt" >/dev/null 2>&1
+expect_eq "setup dies when 1Password is unreachable" "$?" "1"
+expect "the signing key survived the failure" test -f "$opkey"
+expect_eq "and the config still says it signs" "$(cfg identity.opsign.signing)" "ssh"
+new_token_file "$SB/pat5.txt"
+run_setup_user --name opsign --no-sign --token-file "$SB/pat5.txt" >/dev/null 2>&1
+expect_eq "a --no-sign that completes exits 0" "$?" "0"
+expect "and only then is the key shredded" test ! -e "$opkey"
+
+echo "signing refusals:"
+run_setup --pem "$SB/key.pem" --sign >/dev/null 2>&1
+expect_eq "--sign is refused on an app identity" "$?" "1"
+expect "and refuses before touching the PEM" test -f "$SB/key.pem"
+
+echo "signing survives rename:"
+agent rename "$USER_IDENT" bot-renamed >/dev/null 2>&1
+expect_eq "rename exits 0" "$?" "0"
+expect_eq "signingkey follows the rename" \
+  "$(cfg identity.bot-renamed.signingkey)" "$HOME/.config/agent-id/keys/bot-renamed.signing"
+expect "renamed private key exists" test -f "$HOME/.config/agent-id/keys/bot-renamed.signing"
+expect "renamed public key exists" test -f "$HOME/.config/agent-id/keys/bot-renamed.signing.pub"
+expect "stale allowed signers removed" \
+  test ! -e "$HOME/.config/agent-id/git/$USER_IDENT.allowed_signers"
+renamedsign="$HOME/agentic-code/bot-renamed/scoped"
+git init -q "$renamedsign"
+( cd "$renamedsign" && echo x > f && git add f && git commit -q -m "still signed" )
+expect_eq "commits still verify under the new name" \
+  "$(git -C "$renamedsign" log -1 --format='%G?')" "G"
+# Signing keys are credentials like any other, so uninstall leaves them where
+# they are -- same policy as the 1Password items and the on-disk PATs.
+agent uninstall --yes >"$SB/uninstall.out" 2>&1
+expect "uninstall leaves the signing key alone" \
+  test -f "$HOME/.config/agent-id/keys/bot-renamed.signing"
+expect "and names the public half still on the account" \
+  grep -q 'public signing key on the agent account' "$SB/uninstall.out"
 
 # --- uninstall restores prior state ------------------------------------------
 echo "uninstall:"

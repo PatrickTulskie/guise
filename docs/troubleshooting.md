@@ -39,12 +39,47 @@ check for this ("app id != bot user id").
 
 ## Push rejected: signed commits required
 
-**Cause:** the repo (or its org) has a signature ruleset and the app isn't on
-its bypass list. The bot has no signing key by design.
+**Cause:** the repo (or its org) has a signature ruleset and the agent isn't
+signing.
 
-Fix in the UI: Settings → Rules → Rulesets → *(signature ruleset)* →
-Bypass list → Add → Apps → select the agent app → mode **Always**. This is
-scoped, named, and reversible.
+For a **separate GitHub account**, give it a key of its own:
+
+```bash
+agent-id setup --kind user --login <agent-login> --sign
+```
+
+That generates an SSH signing key, switches the scoped config to
+`gpg.format = ssh` with `commit.gpgsign = true`, and prints the public half for
+you to paste onto the agent account (README → *Signed commits*). `doctor` then
+covers it with three checks: key present at mode 600, key registered on the
+account, and a real commit signing and verifying inside agent scope.
+
+For an **App**, there is nothing to sign with — a `your-app[bot]` user has no
+settings page to hold a signing key, and `--sign` is refused. Put the app on the
+ruleset's bypass list instead: Settings → Rules → Rulesets → *(signature
+ruleset)* → Bypass list → Add → **Apps** → the agent app → mode **Always**.
+Scoped, named, and reversible.
+
+## Commits are signed but GitHub shows them Unverified
+
+**Cause:** the public key isn't on the agent account, or it went into the wrong
+list.
+
+`doctor` separates the two halves: "commits sign and verify in agent scope"
+passes (git is signing correctly) while "signing key registered on @\<login\>"
+fails. Only the second one involves GitHub.
+
+Signed in **as the agent account**, go to github.com/settings/ssh/new, set
+**Key type: Signing Key** — not Authentication Key; they are separate lists, and
+an authentication key verifies nothing — and paste
+`~/.config/agent-id/keys/<identity>.signing.pub`. This step is always manual:
+registering a signing key needs an account-level permission that a fine-grained
+PAT cannot carry. Re-running `agent-id setup --sign` prints the key again if you
+need it.
+
+GitHub also matches the signature against the account owning the commit email,
+so a wrong email shows the same symptom — see *PR/commit author shows an
+unlinked name*, above.
 
 ## The agent account's PAT expired, was revoked, or is about to
 
@@ -153,6 +188,8 @@ block. If your own commits changed behavior:
 
 - `git config --show-origin user.email` in one of *your* repos: the origin
   should be your global config, not anything under `~/.config/agent-id/`.
+- Same for `commit.gpgsign` and `gpg.format`: a `--sign` identity sets both, but
+  only inside `~/agentic-code/<identity>/`.
 - `agent-id doctor` runs a "human identity untouched" check.
 - Worst case `agent-id uninstall` removes every trace of the wiring.
 

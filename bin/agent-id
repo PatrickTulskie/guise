@@ -80,6 +80,24 @@ identity_exists() {
 
 key_source() { cfg_get "identity.$1.keysource" || printf 'op'; }
 
+# Commit signing is opt-in, and user identities only: a foo[bot] account has no
+# settings page, so nothing can register a signing key against it.
+signing_enabled() { [[ "$(cfg_get "identity.$1.signing" || true)" == "ssh" ]]; }
+signing_key()     { cfg_get "identity.$1.signingkey" || printf '%s/%s.signing' "$KEYS_DIR" "$1"; }
+allowed_signers() { printf '%s/%s.allowed_signers' "$RENDER_DIR" "$1"; }
+
+# "type base64" with the trailing comment dropped -- the form GitHub stores,
+# and the only part worth comparing.
+pubkey_body() { awk '{print $1" "$2}' "$1"; }
+
+# Public and unauthenticated on purpose: a fine-grained PAT scoped to an org can
+# never read the account's own key list, so ask GitHub the way anyone else would.
+account_signing_keys() { # login -> "type base64", one per line
+  local json
+  json=$(curl -sf "${GITHUB_API}/users/$1/ssh_signing_keys") || return 1
+  printf '%s' "$json" | jq -r '.[] | .key' | awk '{print $1" "$2}'
+}
+
 lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
 
 # "app" is a GitHub App installation (bot), "user" a real GitHub account with a
@@ -386,15 +404,9 @@ agent_conf_template() {
 
 [user]
 	name = {{GIT_NAME}}
-	email = {{GIT_EMAIL}}
+	email = {{GIT_EMAIL}}{{SIGNINGKEY}}
 
-[commit]
-	# The agent identity has no signing key here; global config almost
-	# certainly sets this true.
-	gpgsign = false
-
-[tag]
-	gpgsign = false
+{{SIGNING}}
 
 [credential "https://github.com"]
 	# Empty value CLEARS inherited helpers (osxkeychain), otherwise the
@@ -409,6 +421,36 @@ agent_conf_template() {
 	# ssh would authenticate as the human's key; force https so the
 	# credential helper (and therefore the bot identity) always wins.
 	insteadOf = git@github.com:
+EOF
+}
+
+# Stated rather than inherited: the identity has no signing key, and the human's
+# global config almost certainly sets gpgsign true.
+signing_off_block() {
+  cat <<'EOF'
+[commit]
+	gpgsign = false
+
+[tag]
+	gpgsign = false
+EOF
+}
+
+signing_on_block() { # <allowed signers path>
+  cat <<EOF
+[commit]
+	gpgsign = true
+
+[tag]
+	gpgsign = true
+
+[gpg]
+	format = ssh
+
+[gpg "ssh"]
+	# Lets 'git log --show-signature' verify locally. GitHub verifies against
+	# its own copy of the public key, registered on the agent account.
+	allowedSignersFile = $1
 EOF
 }
 
@@ -465,7 +507,7 @@ EOF
 }
 
 render_identity_conf() { # name
-  local name="$1" tmpl
+  local name="$1" tmpl signing signingkey="" key
   case "$(identity_kind "$name")" in
     user)
       cfg_get "identity.$name.login"  >/dev/null || die "identity '$name' missing login"
@@ -476,13 +518,29 @@ render_identity_conf() { # name
       cfg_get "identity.$name.botuserid" >/dev/null || die "identity '$name' missing botuserid"
       ;;
   esac
+  mkdir -p "$RENDER_DIR"
+  if signing_enabled "$name"; then
+    key=$(signing_key "$name")
+    [[ -f "$key" && -f "$key.pub" ]] \
+      || die "identity '$name' signs commits but its key is gone from $key -- re-run 'agent-id setup --sign'"
+    signing=$(signing_on_block "$(allowed_signers "$name")")
+    signingkey=$(printf '\n\tsigningkey = %s' "$key")
+    # namespaces="git" stops this key vouching for anything but commits and
+    # tags, which is all it is ever asked to sign.
+    printf '%s namespaces="git" %s\n' "$(git_email "$name")" "$(pubkey_body "$key.pub")" \
+      > "$(allowed_signers "$name")"
+  else
+    signing=$(signing_off_block)
+    rm -f "$(allowed_signers "$name")"
+  fi
   tmpl=$(agent_conf_template)
   tmpl=${tmpl//"{{GIT_NAME}}"/$(git_name "$name")}
   tmpl=${tmpl//"{{GIT_EMAIL}}"/$(git_email "$name")}
+  tmpl=${tmpl//"{{SIGNINGKEY}}"/$signingkey}
+  tmpl=${tmpl//"{{SIGNING}}"/$signing}
   tmpl=${tmpl//"{{NAME}}"/$name}
   tmpl=${tmpl//"{{BIN_DIR}}"/$BIN_DIR}
   tmpl=${tmpl//"{{HOOKS_DIR}}"/$HOOKS_DIR}
-  mkdir -p "$RENDER_DIR"
   printf '%s\n' "$tmpl" > "$RENDER_DIR/$name.conf"
 }
 
@@ -538,12 +596,78 @@ remove_include_block() {
 }
 
 # ---------------------------------------------------------------------------
+# Commit signing (user identities only)
+# ---------------------------------------------------------------------------
+
+# git learned SSH signing in 2.34. Older git accepts gpg.format=ssh in config
+# and only errors at commit time, long after setup claimed success.
+git_signs_ssh() {
+  local v major minor
+  v=$(git --version | awk '{print $3}')
+  major=${v%%.*}; minor=${v#*.}; minor=${minor%%.*}
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+  [[ "$major" -gt 2 || ( "$major" -eq 2 && "$minor" -ge 34 ) ]]
+}
+
+# The private half never leaves this machine: generated here, mode 600 under the
+# config dir, and regenerated rather than recovered if it is lost. Deliberately
+# unlike the PAT -- a signing key grants nothing and is cheap to replace, so a
+# copy in 1Password would only widen where it can leak from.
+generate_signing_key() { # <path> <comment>
+  local path="$1"
+  mkdir -p "$KEYS_DIR"; chmod 700 "$KEYS_DIR"
+  if [[ ! -f "$path" ]]; then
+    rm -f "$path.pub"
+    # -N '': no passphrase. One the agent cannot type is one it cannot commit
+    # with, and the key is worthless off this machine anyway.
+    ssh-keygen -q -t ed25519 -N '' -C "$2" -f "$path" </dev/null
+    say "    generated an ed25519 signing key at $path"
+  elif [[ ! -f "$path.pub" ]]; then
+    # Derive the public half back. Via a temp file: a failed redirect would
+    # leave an empty .pub that the branch above then mistakes for a real one.
+    ssh-keygen -y -f "$path" > "$path.pub.tmp"
+    mv "$path.pub.tmp" "$path.pub"
+  fi
+  chmod 600 "$path"
+}
+
+# Registering a key needs an account-level permission a fine-grained PAT cannot
+# carry, so this asks rather than tries. The only GitHub call in the signing
+# path is the unauthenticated read below.
+announce_signing_key() { # <login> <public key file>
+  local login="$1" body
+  body=$(pubkey_body "$2")
+  if account_signing_keys "$login" | grep -qxF "$body"; then
+    say "    signing key already registered on @$login"
+    return 0
+  fi
+  say "    one step left, in a browser as @$login:"
+  say "      github.com/settings/ssh/new  ->  Key type: Signing Key  ->  paste"
+  say "      $body"
+  say "    doctor flags this until you do; commits sign either way, but GitHub"
+  say "    shows them Unverified."
+}
+
+# Takes a path, not an identity: callers shred after the config has stopped
+# pointing at the key. The public half stays on the account, where only that
+# account's owner can remove it, so name it rather than leave it dangling.
+shred_signing_key() { # <private key path>
+  local key="$1"
+  if [[ -f "$key.pub" ]]; then
+    say "    remove this key from the agent account's SSH and GPG keys page:"
+    say "    $(pubkey_body "$key.pub")"
+    rm -f "$key.pub"
+  fi
+  [[ ! -f "$key" ]] || { shred_file "$key"; say "    shredded the local signing key"; }
+}
+
+# ---------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------
 
 cmd_setup() {
   local owner="" app_id="" pem="" name="" vault="Private" coauthor="" base="" op_account="" store=""
-  local kind="" login="" token_file="" make_default=""
+  local kind="" login="" token_file="" make_default="" sign=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)       kind="$2"; shift 2 ;;
@@ -561,6 +685,8 @@ cmd_setup() {
       --coauthor)   coauthor="$2"; shift 2 ;;
       --base-dir)   base="$2"; shift 2 ;;
       --default)    make_default=1; shift ;;
+      --sign)       sign=1; shift ;;
+      --no-sign)    sign=0; shift ;;
       --token)      die "there is no --token flag on purpose -- argv lands in ps output and shell history; use --token-file, or let setup prompt" ;;
       *) die "setup: unknown flag '$1'" ;;
     esac
@@ -595,6 +721,8 @@ cmd_setup() {
       || die "--owner/--app-id/--pem are app-only; --kind user takes --login and --token-file"
   else
     [[ -z "$login$token_file" ]] || die "--login/--token-file require --kind user"
+    [[ "$sign" != "1" ]] \
+      || die "--sign applies to --kind user -- a foo[bot] account has no settings page to register a signing key on"
   fi
 
   # openssl only signs App JWTs, so a user-identity-only install never needs it.
@@ -764,6 +892,29 @@ cmd_setup() {
     if identity_exists "$name"; then store=$(key_source "$name"); else store="op"; fi
   fi
 
+  # --- commit signing -------------------------------------------------------
+  # Sticky: a bare re-run keeps doing whatever this identity already does, so
+  # only an explicit --sign / --no-sign turns it on or off.
+  local want_sign="" sign_key="" drop_sign=""
+  case "$sign" in
+    1) want_sign=1 ;;
+    0) want_sign="" ;;
+    *) if [[ "$kind" == "user" ]] && signing_enabled "$name"; then want_sign=1; fi ;;
+  esac
+  if [[ -n "$want_sign" ]]; then
+    command -v ssh-keygen >/dev/null || die "missing dependency: ssh-keygen (commit signing needs it)"
+    git_signs_ssh || die "git $(git --version | awk '{print $3}') is too old for SSH signing -- 2.34 or newer"
+    sign_key="$KEYS_DIR/$name.signing"
+    say "==> provisioning an SSH signing key for @$login"
+    generate_signing_key "$sign_key" "agent-id $name"
+    announce_signing_key "$login" "$sign_key.pub"
+  elif signing_enabled "$name"; then
+    # Shredding now would leave a rendered conf that still signs, naming a key
+    # that is gone, if anything below this died -- storing the secret can. Same
+    # rule as a source file: shred once the new state is durable, and only after.
+    drop_sign=$(signing_key "$name")
+  fi
+
   # --- store the secret (1Password or a local file), shred the source -------
   mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
   if [[ "$store" == "op" ]]; then
@@ -849,6 +1000,13 @@ cmd_setup() {
     fi
     cfg_unset "identity.$name.opitem"
   fi
+  if [[ -n "$want_sign" ]]; then
+    cfg_set "identity.$name.signing" ssh
+    cfg_set "identity.$name.signingkey" "$sign_key"
+  else
+    cfg_unset "identity.$name.signing"
+    cfg_unset "identity.$name.signingkey"
+  fi
   # The first identity provisioned becomes the default; later ones don't steal
   # it unless asked to.
   if [[ -n "$make_default" ]]; then
@@ -862,10 +1020,15 @@ cmd_setup() {
   render_identity_conf "$name"
   regen_owned_gitconfig
   ensure_include_block
+  if [[ -n "$drop_sign" ]]; then
+    say "==> commit signing is now off for identity '$name'"
+    shred_signing_key "$drop_sign"
+  fi
   mkdir -p "$base/$name"
   install_agent_docs "$base"
 
   say "==> setup complete for identity '$name'"
+  [[ -z "$want_sign" ]] || say "    commits are SSH-signed with $sign_key"
   say "    agent clones go in $base/$name/ (use 'agent-id clone <owner/repo>')"
   say "    default identity: $(default_identity)"
   say ""
@@ -896,6 +1059,9 @@ chk_deps() {
   # must stay in step rather than demanding it everywhere.
   if git config -f "$CONFIG_FILE" --get-regexp '^identity\..*\.appid$' >/dev/null 2>&1; then
     command -v openssl >/dev/null || return 1
+  fi
+  if git config -f "$CONFIG_FILE" --get-regexp '^identity\..*\.signing$' >/dev/null 2>&1; then
+    command -v ssh-keygen >/dev/null || return 1
   fi
 }
 chk_op() { # name field
@@ -1014,6 +1180,25 @@ _chk_includeif() {
 chk_includeif() { with_scoped_repo "$1" _chk_includeif "$1"; }
 _chk_gpgsign() { [[ "$(git -C "$REPO" config --get commit.gpgsign)" == "false" ]]; }
 chk_gpgsign() { with_scoped_repo "$1" _chk_gpgsign; }
+chk_signing_key() {
+  local k
+  k=$(signing_key "$1")
+  [[ -f "$k" && -f "$k.pub" ]] || return 1
+  # Anything looser than 600 and another local account can sign as the agent.
+  [[ "$(file_mode "$k")" == "600" ]]
+}
+chk_signing_registered() {
+  local k
+  k=$(signing_key "$1"); [[ -f "$k.pub" ]] || return 1
+  account_signing_keys "$(cfg_get "identity.$1.login")" | grep -qxF "$(pubkey_body "$k.pub")"
+}
+# End to end rather than by inspection: make a real commit inside agent scope
+# and verify it against the rendered allowed-signers file.
+_chk_signs() {
+  git -C "$REPO" commit -q --allow-empty -m "agent-id doctor" || return 1
+  git -C "$REPO" verify-commit HEAD
+}
+chk_signs() { with_scoped_repo "$1" _chk_signs; }
 _chk_credential() {
   printf 'protocol=https\nhost=github.com\n\n' \
     | GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false git -C "$REPO" credential fill \
@@ -1105,8 +1290,18 @@ cmd_doctor() {
     fi
     check "includeIf resolves identity inside $(basedir)/$name/" \
           "check the include block in ~/.gitconfig and $OWNED_GITCONFIG" chk_includeif "$name"
-    check "commit signing off in agent scope" \
-          "rendered conf should set commit.gpgsign=false -- re-run setup" chk_gpgsign "$name"
+    if signing_enabled "$name"; then
+      check "signing key present, mode 600" \
+            "regenerate it with 'agent-id setup --sign --name $name'" chk_signing_key "$name"
+      check "signing key registered on @$(cfg_get "identity.$name.login")" \
+            "as the agent account, add $(signing_key "$name").pub at github.com/settings/ssh/new with Key type: Signing Key" \
+            chk_signing_registered "$name"
+      check "commits sign and verify in agent scope" \
+            "rendered conf should set gpg.format=ssh and user.signingkey -- re-run 'agent-id setup --sign'" chk_signs "$name"
+    else
+      check "commit signing off in agent scope" \
+            "rendered conf should set commit.gpgsign=false -- re-run setup" chk_gpgsign "$name"
+    fi
     check "credential helper wins (x-access-token)" \
           "inherited osxkeychain not cleared -- rendered conf needs the empty 'helper =' line" chk_credential "$name"
   done
@@ -1124,7 +1319,7 @@ cmd_doctor() {
 # ---------------------------------------------------------------------------
 
 cmd_uninstall() {
-  local yes="" b base
+  local yes="" b base name signed=""
   base=$(basedir)
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1136,6 +1331,12 @@ cmd_uninstall() {
     read -r -p "Remove agent-id wiring (gitconfig include, binaries, config, token cache)? [y/N] " reply
     case "$reply" in y|Y|yes) ;; *) say "aborted"; exit 0 ;; esac
   fi
+
+  # Read while the config still exists: the public half of a signing key stays
+  # on the agent account, and only that account's owner can take it down.
+  for name in $(list_identities); do
+    if signing_enabled "$name"; then signed=1; fi
+  done
 
   remove_include_block
   say "removed agent-id block from ~/.gitconfig"
@@ -1162,7 +1363,9 @@ cmd_uninstall() {
   say ""
   say "left alone (remove yourself if you want them gone):"
   say "  - the 1Password item(s) holding the agent credentials"
-  [[ -d "$KEYS_DIR" ]] && say "  - private keys / tokens in $KEYS_DIR"
+  [[ -d "$KEYS_DIR" ]] && say "  - private keys / tokens / signing keys in $KEYS_DIR"
+  [[ -z "$signed" ]] \
+    || say "  - the public signing key on the agent account (SSH and GPG keys page)"
   say "  - $base and any clones in it"
   say "your own git identity was never modified and is unchanged"
 }
@@ -1276,6 +1479,17 @@ cmd_rename() {
     fi
   done
 
+  # The signing key is a pair, and ${f##*.} above would turn <old>.signing.pub
+  # into <new>.pub, so it moves separately.
+  if signing_enabled "$new"; then
+    f=$(signing_key "$new")
+    if [[ -f "$f" ]]; then
+      mv "$f" "$KEYS_DIR/$new.signing"
+      [[ ! -f "$f.pub" ]] || mv "$f.pub" "$KEYS_DIR/$new.signing.pub"
+      cfg_set "identity.$new.signingkey" "$KEYS_DIR/$new.signing"
+    fi
+  fi
+
   if [[ -d "$src" ]]; then
     mv "$src" "$dst"
     say "moved $src -> $dst (reopen anything you had open in there)"
@@ -1283,7 +1497,7 @@ cmd_rename() {
     mkdir -p "$dst"
   fi
 
-  rm -f "$RENDER_DIR/$old.conf" "$CACHE_DIR/$old.token.json"
+  rm -f "$RENDER_DIR/$old.conf" "$CACHE_DIR/$old.token.json" "$(allowed_signers "$old")"
   render_identity_conf "$new"
   regen_owned_gitconfig
   ensure_include_block
@@ -1312,6 +1526,8 @@ usage: agent-id <command> [flags]
                --kind user [--login <account>] [--token-file <path>]
                the token file is shredded after storing; with neither flag
                setup reuses a stored token or prompts (never via argv)
+               [--sign | --no-sign]  SSH-sign this identity's commits with a
+                                     key of its own (app identities can't)
              common:
                [--name <identity>]  default: the app slug / account login
                [--default]          make this the default identity
@@ -1330,7 +1546,7 @@ usage: agent-id <command> [flags]
              <owner/repo | url> [--name <identity>]
   token      print the identity's token  [identity]
   default    show the identity used when none is named, or set it  [<name>]
-  rename     rename an identity, its directory, and its key file
+  rename     rename an identity, its directory, and its key files
              <old> <new>
 EOF
 }

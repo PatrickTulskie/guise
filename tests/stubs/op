@@ -4,6 +4,10 @@ set -euo pipefail
 
 dir="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
 
+# Set by tests that assert 1Password is never consulted (file-store installs,
+# and `update`, which must work against a locked vault).
+[[ -z "${OP_FAKE_FORBID:-}" ]] || { echo "op stub: called when it should not have been: $*" >&2; exit 1; }
+
 if [[ "${1:-}" == "--account" ]]; then
   [[ -n "${OP_FAKE_ACCOUNT:-}" && "$2" == "$OP_FAKE_ACCOUNT" ]] \
     || { echo "op stub: unexpected account: $2" >&2; exit 1; }
