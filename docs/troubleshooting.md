@@ -15,9 +15,12 @@ lookup, or the repo isn't inside the agent directory at all.
   `helper =` line before the real one — that empty line clears inherited
   helpers. Verify with:
   ```bash
-  printf 'protocol=https\nhost=github.com\n\n' | git credential fill
+  printf 'protocol=https\nhost=github.com\n\n' \
+    | git credential fill | sed -n 's/^username=//p'
   ```
-  run inside the repo; username must be `x-access-token`.
+  run inside the repo; it must print `x-access-token`. The `sed` matters:
+  `git credential fill` prints the resolved *password* too, so without it you
+  would echo a live token into your scrollback (and into anything you paste).
 - Cloned over ssh? ssh authenticates with *your* key. The agent conf rewrites
   `git@github.com:` to https, but a remote hardcoded elsewhere may bypass it.
   `git remote -v` should show https URLs.
