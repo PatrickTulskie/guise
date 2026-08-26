@@ -577,8 +577,11 @@ cmd_setup() {
     [[ -z "$login$token_file" ]] || die "--login/--token-file require --kind user"
   fi
 
-  local dep
-  for dep in gh jq openssl git curl; do
+  # openssl only signs App JWTs, so a user-identity-only install never needs it.
+  # doctor's dependency check has to stay in step with this list.
+  local dep deps="gh jq git curl"
+  [[ "$kind" != "app" ]] || deps="$deps openssl"
+  for dep in $deps; do
     command -v "$dep" >/dev/null || die "missing dependency: $dep"
   done
 
@@ -865,7 +868,15 @@ check() { # "description" "remediation hint" fn args...
   fi
 }
 
-chk_deps() { local c; for c in gh jq openssl git curl; do command -v "$c" >/dev/null || return 1; done; }
+chk_deps() {
+  local c
+  for c in gh jq git curl; do command -v "$c" >/dev/null || return 1; done
+  # openssl only signs App JWTs, and setup requires it only for those, so doctor
+  # must stay in step rather than demanding it everywhere.
+  if git config -f "$CONFIG_FILE" --get-regexp '^identity\..*\.appid$' >/dev/null 2>&1; then
+    command -v openssl >/dev/null || return 1
+  fi
+}
 chk_op() { # name field
   local acct
   command -v op >/dev/null || return 1
