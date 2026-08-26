@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# A superseded push has nothing left to tell us.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    # macOS is the platform this tool targets: bash 3.2, BSD stat/date, and the
+    # osxkeychain helper the rendered git config has to override. Running the
+    # suite anywhere else would test a platform nobody installs on.
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      # Pinned by commit: a tag is mutable, and this job runs test code from the
+      # PR branch. Nothing here talks to a remote, so the checkout token has no
+      # reason to sit in .git/config while that code runs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The suite needs git, openssl, jq, and ssh-keygen; op, curl, and gh are
+      # stubbed by the harness. Logged so a runner image that moves bash out
+      # from under bash 3.2 shows up here instead of as a mystery failure.
+      - name: Record the environment under test
+        run: |
+          bash --version | head -1
+          git --version
+          openssl version
+          jq --version
+          ssh -V
+
+      - name: tests/run.sh
+        run: bash tests/run.sh
