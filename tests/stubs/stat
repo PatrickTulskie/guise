@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Real stat unless FAKE_STAT_GNU is set. In fake mode, reproduce the two GNU
+# forms that matter here, including -f writing filesystem output before failing.
+set -uo pipefail
+
+[[ -n "${FAKE_STAT_GNU:-}" ]] || exec /usr/bin/stat "$@"
+
+if [[ "${1:-}" == "-c" && "${2:-}" == "%a" && $# -eq 3 ]]; then
+  /usr/bin/stat -c '%a' "$3" 2>/dev/null || /usr/bin/stat -f '%Lp' "$3"
+  exit $?
+fi
+
+if [[ "${1:-}" == "-f" && "${2:-}" == "%Lp" && $# -eq 3 ]]; then
+  [[ -e "$3" ]] && printf '  File: "%s"\n  Type: fake GNU filesystem\n' "$3"
+  exit 1
+fi
+
+echo "stat stub: unsupported in GNU mode: $*" >&2
+exit 1

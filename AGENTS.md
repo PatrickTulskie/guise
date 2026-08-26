@@ -60,6 +60,7 @@ rather than recorded fixtures:
 | `tests/stubs/op` | 1Password CLI, backed by files under `$OP_FAKE_DIR/<vault>/<item>/<field>` | `OP_FAKE_ACCOUNT`, `OP_FAKE_FORBID` (assert op is never called) |
 | `tests/stubs/curl` | the GitHub API, matched on URL, every call logged to `$CURL_LOG` | `FAKE_APP_ID`, `FAKE_SLUG`, `FAKE_OWNER`, `FAKE_BOT_ID`, `FAKE_LOGIN`, `FAKE_USER_ID`, `FAKE_TOKEN_EXPIRES`, `FAKE_REPO_COUNT` |
 | `tests/stubs/gh` | `gh api user` only, to answer "is this the human's own account?" | `FAKE_GH_LOGIN` (unset = logged out, which must warn, not block) |
+| `tests/stubs/stat` | real `stat` until asked otherwise, then GNU semantics | `FAKE_STAT_GNU` (makes a macOS run exercise the GNU branch of `file_mode`) |
 
 The curl stub serves the account's public signing keys from
 `$SIGNING_KEYS_FILE`; tests append to that file to stand in for a human pasting

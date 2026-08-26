@@ -184,7 +184,7 @@ expect_eq "file-store setup exits 0" "$?" "0"
 keyfile="$HOME/.config/agent-id/keys/$APP_IDENT.pem"
 expect "key file written" test -f "$keyfile"
 expect_eq "key file mode 600" \
-  "$(stat -f '%Lp' "$keyfile" 2>/dev/null || stat -c '%a' "$keyfile")" "600"
+  "$(stat -c '%a' "$keyfile" 2>/dev/null || stat -f '%Lp' "$keyfile")" "600"
 expect_eq "keysource recorded" "$(cfg identity.$APP_IDENT.keysource)" "file"
 expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/test-agent"
 expect "PEM shredded after storing" test ! -e "$SB/key.pem"
@@ -198,6 +198,8 @@ expect_eq "second file identity reuses key without --pem" "$?" "0"
 expect "second identity got its own key file" test -f "$HOME/.config/agent-id/keys/second.pem"
 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
 expect_eq "doctor passes with file store" "$?" "0"
+FAKE_STAT_GNU=1 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+expect_eq "doctor reads app-key permissions with GNU stat semantics" "$?" "0"
 "$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
 expect "uninstall keeps key files" test -f "$keyfile"
 expect "uninstall removes config file" test ! -e "$HOME/.config/agent-id/config"
@@ -274,12 +276,14 @@ expect_eq "file-store user setup exits 0" "$?" "0"
 tokenfile="$HOME/.config/agent-id/keys/$USER_IDENT.token"
 expect "token file written" test -f "$tokenfile"
 expect_eq "token file mode 600" \
-  "$(stat -f '%Lp' "$tokenfile" 2>/dev/null || stat -c '%a' "$tokenfile")" "600"
+  "$(stat -c '%a' "$tokenfile" 2>/dev/null || stat -f '%Lp' "$tokenfile")" "600"
 expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/patrick-agent"
 expect_eq "token helper reads the file" \
   "$("$HOME/.local/bin/agent-id-token" "$USER_IDENT")" "github_pat_filestore"
 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
 expect_eq "doctor passes with a file-stored PAT" "$?" "0"
+FAKE_STAT_GNU=1 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+expect_eq "doctor reads token permissions with GNU stat semantics" "$?" "0"
 
 # The store is settled only after the identity name is, so an unrelated
 # file-store default can't quietly route a new App's private key to disk.
@@ -412,6 +416,8 @@ echo "once the key is on the account:"
 awk '{print $1" "$2}' "$signkey.pub" >> "$SIGNING_KEYS_FILE"
 agent doctor >/dev/null 2>&1
 expect_eq "doctor passes" "$?" "0"
+FAKE_STAT_GNU=1 agent doctor >/dev/null 2>&1
+expect_eq "doctor reads signing-key permissions with GNU stat semantics" "$?" "0"
 run_setup_user --login "$USER_IDENT" >"$SB/sign2.out" 2>&1
 expect_eq "a bare re-run exits 0 now" "$?" "0"
 expect "and says the key is already registered" \
