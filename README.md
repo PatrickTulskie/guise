@@ -33,6 +33,9 @@ That identity can be a **GitHub App bot** (below — the better default) or a
 **[separate GitHub account](#a-separate-github-account-instead-of-an-app)**.
 Both kinds can coexist, one per subdirectory.
 
+The tool is tested on macOS and Linux, and stays compatible with the bash 3.2
+that ships with macOS.
+
 ## Setting up a GitHub App bot
 
 ### One-time GitHub setup (two browser steps)

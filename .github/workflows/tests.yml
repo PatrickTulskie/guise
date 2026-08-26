@@ -18,10 +18,15 @@ concurrency:
 
 jobs:
   run:
-    # macOS is the platform this tool targets: bash 3.2, BSD stat/date, and the
-    # osxkeychain helper the rendered git config has to override. Running the
-    # suite anywhere else would test a platform nobody installs on.
-    runs-on: macos-latest
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    # macOS covers bash 3.2, BSD tools, and the osxkeychain helper the rendered
+    # git config has to override. Linux covers the GNU tool variants that
+    # cloud-hosted coding agents run on.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       # Pinned by commit: a tag is mutable, and this job runs test code from the
