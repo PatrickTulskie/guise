@@ -126,6 +126,22 @@ expect_eq "co-author trailer added on commit -m" \
 expect_eq "trailer not duplicated on --amend" \
   "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "1"
 
+# A missing global identity must not abort the commit: git config exits 1 on an
+# unset key and the hook runs under set -e. Driven directly rather than through a
+# commit, so unsetting the global identity can't reorder ~/.gitconfig and leave
+# [user] winning over the include.
+hook="$HOME/.config/agent-id/git/agent-hooks/prepare-commit-msg"
+mkdir -p "$SB/nohome"
+printf 'a commit subject\n' > "$SB/msg.txt"
+( HOME="$SB/nohome" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+expect_eq "hook exits 0 when there is no identity to credit" "$?" "0"
+expect_eq "and leaves the message without a trailer" \
+  "$(grep -c '^Co-authored-by:' "$SB/msg.txt")" "0"
+printf 'a commit subject\n' > "$SB/msg.txt"
+( AGENT_ID_CO_AUTHOR="Someone <s@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+expect_eq "and still adds the trailer when one is available" \
+  "$(grep -c '^Co-authored-by: Someone <s@example.com>$' "$SB/msg.txt")" "1"
+
 # --- token cache -------------------------------------------------------------
 echo "token cache:"
 rm -rf "$XDG_CACHE_HOME/agent-id"; : > "$CURL_LOG"

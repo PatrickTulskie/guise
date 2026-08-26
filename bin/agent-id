@@ -348,8 +348,15 @@ if [[ -z "$CO_AUTHOR" && -f "$CONFIG" ]]; then
   CO_AUTHOR=$(git config -f "$CONFIG" --get core.coauthor 2>/dev/null || true)
 fi
 if [[ -z "$CO_AUTHOR" ]]; then
-  CO_AUTHOR="$(git config --global user.name) <$(git config --global user.email)>"
+  # git config exits 1 when a key is unset, and under set -e that would take
+  # the whole hook down and abort a commit that was otherwise fine.
+  name=$(git config --global user.name || true)
+  email=$(git config --global user.email || true)
+  [[ -z "$name" || -z "$email" ]] || CO_AUTHOR="$name <$email>"
 fi
+
+# No one to credit: leave the message alone rather than failing the commit.
+[[ -n "$CO_AUTHOR" ]] || exit 0
 
 git interpret-trailers --if-exists doNothing \
   --trailer "Co-authored-by: ${CO_AUTHOR}" \
