@@ -374,7 +374,7 @@ run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
 run_setup --store file --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
 mkdir -p "$SB/origins/owner"
-for r in one two three four; do git init -q --bare "$SB/origins/owner/$r.git"; done
+for r in one two three four five; do git init -q --bare "$SB/origins/owner/$r.git"; done
 git config --global url."$SB/origins/".insteadOf "https://github.com/"
 
 ( cd "$HOME/agentic-code/platform" && agent clone owner/one ) >/dev/null 2>&1
@@ -391,6 +391,29 @@ expect "a directory under the base dir that is not an identity falls back" \
 ( cd "$HOME" && agent clone owner/four ) >/dev/null 2>&1
 expect "clone from outside the base directory uses the default" \
   test -d "$HOME/agentic-code/$APP_IDENT/four/.git"
+
+# setup keeps the path it was given, so both spellings of the same basedir have
+# to resolve the same identity.
+git config -f "$HOME/.config/agent-id/config" core.basedir "$HOME/agentic-code/"
+( cd "$HOME/agentic-code/platform" && agent clone owner/five ) >/dev/null 2>&1
+expect "a trailing slash on basedir still selects the current identity" \
+  test -d "$HOME/agentic-code/platform/five/.git"
+
+# A basedir of / puts identity directories at the root, so this one clone
+# lands outside the sandbox by definition. Keep the destination unpredictable
+# and take it away again.
+root_dest=$(mktemp -d /tmp/agent-id-root.XXXXXX)
+root_repo=${root_dest##*/}
+# clone refuses an existing destination, even an empty one.
+rmdir "$root_dest"
+git init -q --bare "$SB/origins/owner/$root_repo.git"
+git config -f "$HOME/.config/agent-id/config" --rename-section identity.platform identity.tmp
+git config -f "$HOME/.config/agent-id/config" core.basedir /
+root_cwd=$(mktemp -d /tmp/agent-id-root.XXXXXX)
+( cd "$root_cwd" && agent clone "owner/$root_repo" ) >/dev/null 2>&1
+expect "a root basedir treats an absolute current directory as contained" \
+  test -d "$root_dest/.git"
+rm -rf "$root_cwd" "$root_dest"
 
 # --- use ----------------------------------------------------------------------
 # `use` replaces itself with $SHELL, so stand a recording script in for one and

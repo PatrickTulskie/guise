@@ -100,8 +100,15 @@ resolve_default() {
 identity_from_cwd() {
   local base rel name
   base=$(basedir)
-  case "$PWD/" in "$base"/*) ;; *) return 1 ;; esac
-  rel="${PWD#"$base"/}"
+  # setup stores the path as given, so an equivalent basedir can arrive with a
+  # trailing separator that would otherwise never match $PWD.
+  while [[ "$base" != "/" && "$base" == */ ]]; do base="${base%/}"; done
+  if [[ "$base" == "/" ]]; then
+    case "$PWD" in /*) rel="${PWD#/}" ;; *) return 1 ;; esac
+  else
+    case "$PWD/" in "$base"/*) ;; *) return 1 ;; esac
+    rel="${PWD#"$base"/}"
+  fi
   name="${rel%%/*}"
   [[ -n "$name" ]] || return 1
   identity_exists "$name" || return 1
