@@ -669,19 +669,30 @@ include_block() {
 
 # Both ~/.gitconfig and the shell rc get a block between the same markers, so
 # the add-or-replace and the byte-identical removal are written once.
+
+# Rewrite in place rather than renaming over the path: dotfiles are routinely
+# symlinks into a dotfiles repo, and `mv` would swap the link itself for a
+# regular file and leave the block behind in the file the shell really reads.
+# Writing through the descriptor follows the link and keeps mode and ownership.
+replace_contents() { # file source
+  cat "$2" > "$1"
+  rm -f "$2"
+}
+
 ensure_marked_block() { # file block
-  local file="$1" block="$2" current tmp
+  local file="$1" block="$2" current
   touch "$file"
   if grep -qF "$MARK_START" "$file"; then
     current=$(awk -v s="$MARK_START" -v e="$MARK_END" '$0==s{f=1} f{print} $0==e{f=0}' "$file")
     [[ "$current" == "$block" ]] && return 0
-    tmp=$(mktemp)
-    awk -v s="$MARK_START" -v e="$MARK_END" -v b="$block" \
-      '$0==s{print b; f=1; next} $0==e{f=0; next} f{next} {print}' \
-      "$file" > "$tmp" && mv "$tmp" "$file"
-  else
-    printf '\n%s\n' "$block" >> "$file"
+    # Drop it and re-append rather than swapping it in place: the block spans
+    # lines, and `awk -v` will not carry a newline (BWK awk rejects it outright,
+    # so the in-place form failed on macOS). The end of the file is where a
+    # fresh setup puts the block anyway, and for ~/.gitconfig it is the position
+    # that has to win over anything above it.
+    remove_marked_block "$file"
   fi
+  printf '\n%s\n' "$block" >> "$file"
 }
 
 remove_marked_block() { # file
@@ -696,7 +707,7 @@ remove_marked_block() { # file
     inb   { next }
           { lines[++n]=$0 }
     END   { for (i=1; i<=n; i++) print lines[i] }
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  ' "$file" > "$tmp" && replace_contents "$file" "$tmp"
 }
 
 ensure_include_block() { ensure_marked_block "$HOME/.gitconfig" "$(include_block)"; }
