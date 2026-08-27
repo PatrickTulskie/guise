@@ -230,7 +230,8 @@ cd some-repo
 agent-gh pr create --fill                 # opens the PR as the bot
 ```
 
-`agent-id use` with no name lists your identities and asks which one.
+`agent-id use` with no name goes to your default identity — the one
+`agent-id default` prints.
 
 It moves the shell you're already in, which needs a small shell function that
 `setup` installs to `~/.config/agent-id/hook.sh` and sources from your `~/.zshrc`
@@ -257,7 +258,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `agent-id setup` | provision an identity (idempotent) |
 | `agent-id doctor` | verify everything; non-zero exit on any failure |
 | `agent-id clone <owner/repo>` | clone where the identity applies |
-| `agent-id use [name]` | cd to an identity's directory; asks which one if you don't say |
+| `agent-id use [name]` | cd to an identity's directory; the default one if you don't say |
 | `agent-id update` | reinstall helpers, hook, and rendered confs from this copy of the script |
 | `agent-id token` | print the identity's token (debugging / harness use) |
 | `agent-id default [name]` | show or change the identity used when none is named |

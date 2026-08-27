@@ -414,17 +414,23 @@ expect_eq "use lands in the named identity's directory" \
 # no stale variable to follow you out of the tree.
 expect_eq "and exports nothing to go stale" "$(cat "$SB/use.identity")" ""
 
-# The list is sorted, so 1 is 'platform' -- not the default, which is what makes
-# the answer observable.
-rm -f "$SB/use.pwd"
-printf '1\n' | SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use >/dev/null 2>&1
-expect_eq "picking by number selects that identity" \
-  "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
-
 rm -f "$SB/use.pwd"
 SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use </dev/null >/dev/null 2>&1
-expect_eq "no name and nothing to read falls back to the default" \
+expect_eq "no name lands in the default identity's directory" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/$APP_IDENT"
+
+# Retargeting the default moves where a bare `use` lands, which is what tells
+# the config apart from any first-identity fallback.
+rm -f "$SB/use.pwd"
+agent default platform >/dev/null
+SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use </dev/null >/dev/null 2>&1
+expect_eq "and follows the default when it moves" \
+  "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
+
+# Nothing configured and more than one identity: there is no right guess.
+git config -f "$HOME/.config/agent-id/config" --unset core.defaultidentity
+expect_fail "use refuses to guess with no default and several identities" agent use
+agent default "$APP_IDENT" >/dev/null
 
 expect_fail "use refuses an unknown identity" agent use nonesuch
 
