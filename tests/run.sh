@@ -578,6 +578,20 @@ expect_eq "setup fails on a gitconfig carrying two blocks" "$?" "1"
 expect "and leaves it untouched rather than picking one" \
   cmp -s "$HOME/.gitconfig" "$SB/gitconfig.pre"
 
+# A line that only quotes the marker text is ordinary shell, not wiring. Marker
+# discovery compares whole lines for that reason, and setup has to sail past it.
+new_sandbox
+printf 'echo "# >>> agent-id >>>"\nalias ll="ls -l"\n' > "$HOME/.zshrc"
+run_setup --store file --pem "$SB/key.pem" > "$SB/quoted.out" 2>&1
+expect_eq "setup ignores a line that merely quotes a marker" "$?" "0"
+expect "and the line is still there afterwards" \
+  grep -qxF 'echo "# >>> agent-id >>>"' "$HOME/.zshrc"
+expect_eq "with exactly one real block added below it" \
+  "$(grep -cxF '# >>> agent-id >>>' "$HOME/.zshrc")" "1"
+"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+expect_eq "and uninstall takes the block, not the quoted line" \
+  "$(cat "$HOME/.zshrc")" "$(printf 'echo "# >>> agent-id >>>"\nalias ll="ls -l"')"
+
 # Restore is byte-for-byte, which includes a file that never ended in a newline:
 # awk's print would quietly add one and uninstall would hand back a longer file.
 new_sandbox

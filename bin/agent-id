@@ -678,8 +678,11 @@ replace_contents() { # file source
   rm -f "$2"
 }
 
+# -x, because validation below compares whole lines: without it a line that
+# merely quotes the marker text -- `echo "# >>> agent-id >>>"` -- looks like
+# wiring here and like a stray marker there, and setup refuses a good rc.
 has_markers() { # file
-  grep -qF "$MARK_START" "$1" || grep -qF "$MARK_END" "$1"
+  grep -qxF "$MARK_START" "$1" || grep -qxF "$MARK_END" "$1"
 }
 
 # Exactly one complete pair, in order. Anything else -- an orphan marker left by
@@ -1408,7 +1411,7 @@ chk_shell_hook() {
   local rc
   [[ -f "$SHELL_HOOK" ]] || return 1
   rc=$(shell_rc) || return 1
-  grep -qF "$MARK_START" "$rc"
+  grep -qxF "$MARK_START" "$rc"
 }
 chk_binaries() { local b; for b in $HELPERS; do [[ -x "$BIN_DIR/$b" ]] || return 1; done; }
 
