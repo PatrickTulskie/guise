@@ -23,6 +23,7 @@ SHELL_HOOK="$CONFIG_DIR/hook.sh"
 BIN_DIR="$HOME/.local/bin"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
 DEFAULT_BASEDIR="$HOME/agentic-code"
+VAULT="Private"
 MARK_START='# >>> agent-id >>>'
 MARK_END='# <<< agent-id <<<'
 GITHUB_API="${AGENT_ID_GITHUB_API:-https://api.github.com}"
@@ -784,7 +785,7 @@ shred_signing_key() { # <private key path>
 # ---------------------------------------------------------------------------
 
 cmd_setup() {
-  local owner="" app_id="" pem="" name="" vault="Private" coauthor="" base="" op_account="" store=""
+  local owner="" app_id="" pem="" name="" vault="$VAULT" coauthor="" base="" op_account="" store=""
   local kind="" login="" token_file="" make_default="" sign=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
