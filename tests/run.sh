@@ -554,6 +554,40 @@ expect "rc target byte-identical to pre-setup" \
 expect "gitconfig target byte-identical to pre-setup" \
   cmp -s "$HOME/dotfiles/gitconfig" "$SB/gitconfig.pre"
 
+# --- stray markers -------------------------------------------------------------
+# The block is found by its markers, so a file where they do not form one clean
+# pair cannot be edited without guessing. Guessing here means deleting lines the
+# human wrote, so refuse the file and leave it alone.
+echo "stray markers:"
+new_sandbox
+printf 'alias ll="ls -l"\n# >>> agent-id >>>\nexport IMPORTANT=1\n' > "$HOME/.zshrc"
+cp "$HOME/.zshrc" "$SB/zshrc.pre"
+run_setup --store file --pem "$SB/key.pem" > "$SB/stray.out" 2>&1
+expect_eq "setup fails on an rc with an orphan start marker" "$?" "1"
+expect "and names the file to fix" \
+  grep -qF "error: ~/.zshrc has a stray agent-id marker" "$SB/stray.out"
+expect "and the lines below the orphan are still there" \
+  cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
+
+new_sandbox
+printf '\n# >>> agent-id >>>\nstale\n# <<< agent-id <<<\n' >> "$HOME/.gitconfig"
+printf '\n# >>> agent-id >>>\nstale\n# <<< agent-id <<<\n' >> "$HOME/.gitconfig"
+cp "$HOME/.gitconfig" "$SB/gitconfig.pre"
+run_setup --store file --pem "$SB/key.pem" > "$SB/dup.out" 2>&1
+expect_eq "setup fails on a gitconfig carrying two blocks" "$?" "1"
+expect "and leaves it untouched rather than picking one" \
+  cmp -s "$HOME/.gitconfig" "$SB/gitconfig.pre"
+
+# Restore is byte-for-byte, which includes a file that never ended in a newline:
+# awk's print would quietly add one and uninstall would hand back a longer file.
+new_sandbox
+printf 'alias ll="ls -l"' > "$HOME/.zshrc"
+cp "$HOME/.zshrc" "$SB/zshrc.pre"
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+expect "an rc with no trailing newline comes back byte-identical" \
+  cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
+
 # --- commit signing ----------------------------------------------------------
 # A separate GitHub account is a real account, so it can hold an SSH signing key
 # and GitHub can mark its commits Verified. App identities cannot: there is no

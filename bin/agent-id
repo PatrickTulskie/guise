@@ -678,35 +678,86 @@ replace_contents() { # file source
   rm -f "$2"
 }
 
+has_markers() { # file
+  grep -qF "$MARK_START" "$1" || grep -qF "$MARK_END" "$1"
+}
+
+# Exactly one complete pair, in order. Anything else -- an orphan marker left by
+# a hand edit, a duplicated block -- makes the removal below ambiguous, and the
+# ambiguity would be resolved by deleting lines the human wrote. Refuse instead.
+# `bad` carries the verdict rather than the exit status: whether awk keeps a
+# rule's status through END is not something every awk agrees on.
+valid_markers() { # file
+  awk -v s="$MARK_START" -v e="$MARK_END" '
+    $0==s { if (open || starts) { bad=1; exit } open=1; starts=1; next }
+    $0==e { if (!open || ends)  { bad=1; exit } open=0; ends=1; next }
+    END   { if (bad || open || starts != 1 || ends != 1) exit 1 }
+  ' "$1"
+}
+
+check_markers() { # file
+  has_markers "$1" || return 0
+  valid_markers "$1" \
+    || die "$(display_path "$1") has a stray agent-id marker -- the block is not one clean pair, so it cannot be edited safely. Fix the markers by hand, then re-run."
+}
+
+# Drop the block plus the single blank line setup inserted above it. The file's
+# own trailing-newline state has to come back with it, or uninstall leaves a
+# file one byte longer than it found -- `separator` covers a block at the end of
+# the file, `eofnl` a block with the human's lines still after it.
+without_marked_block() { # file -> contents on stdout; caller validates first
+  local eof_newline=0
+  if [[ -s "$1" && "$(tail -c 1 "$1" | wc -l | tr -d ' ')" == "1" ]]; then
+    eof_newline=1
+  fi
+  awk -v s="$MARK_START" -v e="$MARK_END" -v eofnl="$eof_newline" '
+    $0==s { inb=1; if (n > 0 && lines[n] == "") { n--; separator=1 } next }
+    $0==e { inb=0; ended=1; next }
+    inb   { next }
+          { lines[++n]=$0; if (ended) post=1 }
+    END {
+      final_newline = post ? eofnl : separator
+      for (i=1; i<=n; i++) {
+        if (i < n || final_newline) print lines[i]
+        else printf "%s", lines[i]
+      }
+    }
+  ' "$1"
+}
+
 ensure_marked_block() { # file block
-  local file="$1" block="$2" current
+  local file="$1" block="$2" current tmp
   touch "$file"
-  if grep -qF "$MARK_START" "$file"; then
+  check_markers "$file"
+  if has_markers "$file"; then
     current=$(awk -v s="$MARK_START" -v e="$MARK_END" '$0==s{f=1} f{print} $0==e{f=0}' "$file")
     [[ "$current" == "$block" ]] && return 0
-    # Drop it and re-append rather than swapping it in place: the block spans
-    # lines, and `awk -v` will not carry a newline (BWK awk rejects it outright,
-    # so the in-place form failed on macOS). The end of the file is where a
-    # fresh setup puts the block anyway, and for ~/.gitconfig it is the position
-    # that has to win over anything above it.
-    remove_marked_block "$file"
   fi
-  printf '\n%s\n' "$block" >> "$file"
+
+  # Build the whole result before the file is touched, so a stale block cannot
+  # be dropped by a removal that succeeds and an append that then fails. The
+  # block is re-appended rather than swapped in place: it spans lines, and
+  # `awk -v` will not carry a newline (BWK awk rejects it outright). The end of
+  # the file is where a fresh setup puts it anyway, and for ~/.gitconfig it is
+  # the position that has to win over anything above it.
+  tmp=$(mktemp)
+  if has_markers "$file"; then
+    without_marked_block "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  else
+    cat "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  fi
+  printf '\n%s\n' "$block" >> "$tmp" || { rm -f "$tmp"; return 1; }
+  replace_contents "$file" "$tmp"
 }
 
 remove_marked_block() { # file
   local file="$1" tmp
   [[ -f "$file" ]] || return 0
-  grep -qF "$MARK_START" "$file" || return 0
+  has_markers "$file" || return 0
+  check_markers "$file"
   tmp=$(mktemp)
-  # Drop the block plus the single blank line setup inserted above it.
-  awk -v s="$MARK_START" -v e="$MARK_END" '
-    $0==s { inb=1; if (n > 0 && lines[n] == "") n--; next }
-    $0==e { inb=0; next }
-    inb   { next }
-          { lines[++n]=$0 }
-    END   { for (i=1; i<=n; i++) print lines[i] }
-  ' "$file" > "$tmp" && replace_contents "$file" "$tmp"
+  without_marked_block "$file" > "$tmp" || { rm -f "$tmp"; return 1; }
+  replace_contents "$file" "$tmp"
 }
 
 ensure_include_block() { ensure_marked_block "$HOME/.gitconfig" "$(include_block)"; }

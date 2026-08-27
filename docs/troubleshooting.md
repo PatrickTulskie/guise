@@ -195,6 +195,22 @@ If it still doesn't take:
   `agent-id` and delegates to the real script, so `~/.local/bin` has to be on
   `PATH`.
 
+## Setup or uninstall stops: "has a stray agent-id marker"
+
+`setup` keeps its lines in `~/.gitconfig` and your shell rc between
+`# >>> agent-id >>>` and `# <<< agent-id <<<`, and finds them again by those
+markers. If a file has an unpaired marker, two blocks, or one out of order,
+there is no single block to replace and no safe way to guess which lines are
+yours — so the command stops and changes nothing.
+
+`grep -n 'agent-id >>>\|agent-id <<<' ~/.gitconfig ~/.zshrc` shows what is
+there. Usually it is an orphan left by a hand edit that deleted half a block, or
+a config merged from two machines. Delete the stray markers and the lines
+between them, leaving either one complete pair or none, then re-run.
+
+This is the one case where the tool refuses a file rather than rewriting it: a
+guess here would take out lines you wrote.
+
 ## `gh` commands act as you, not the bot
 
 Plain `gh` uses your stored login. Use `agent-gh` — it injects a bot token via
