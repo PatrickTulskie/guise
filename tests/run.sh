@@ -487,7 +487,7 @@ fi
 # and its pattern substitution is where the escaping goes wrong. The eval that
 # checks the result can run under any bash -- a mangled quote is a syntax error
 # in every one of them.
-quoted_base="$HOME/pat's agent-id"
+quoted_base="$HOME/pat's ünïcode agent-id"
 git config -f "$HOME/.config/agent-id/config" core.basedir "$quoted_base"
 emitted=$(/bin/bash "$ROOT/bin/agent-id" use platform --emit-shell </dev/null)
 expect_eq "a quote in the path survives the eval the hook does" \

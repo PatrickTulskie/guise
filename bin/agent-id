@@ -1626,12 +1626,17 @@ cmd_default() {
 
 # A child process cannot cd its parent, so this replaces itself with a shell
 # already sitting in the directory. Leave it the way you leave any shell: exit.
-# Wrap a path so the shell hook's eval sees one word whatever is in it. sed
-# rather than ${var//}: bash 3.2 mangles the '\'' escape in the replacement.
+# Wrap a path so the shell hook's eval sees one word whatever is in it. Split on
+# the quote by hand rather than with ${var//}, which mangles the '\'' escape on
+# bash 3.2, or with sed, which under a UTF-8 locale rejects a path carrying
+# bytes that are not valid in it. Builtins only, so no locale is consulted.
 shell_quote() {
-  local escaped
-  escaped=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
-  printf "'%s'" "$escaped"
+  local out="" rest="$1"
+  while [[ "$rest" == *\'* ]]; do
+    out="$out${rest%%\'*}'\\''"
+    rest="${rest#*\'}"
+  done
+  printf "'%s%s'" "$out" "$rest"
 }
 
 cmd_use() {
