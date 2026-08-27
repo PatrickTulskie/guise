@@ -37,8 +37,9 @@ you are on the machine they mean, too — `setup` writes to the `$HOME` of
 whatever host you happen to be running on, so from a cloud or container session
 you would file their PAT somewhere ephemeral and useless.
 
-`use` is harmless but not for you: it replaces itself with an interactive shell,
-so a tool call that runs it never returns.
+`use` is harmless but a bare `agent-id use` is not for you: with no shell hook
+loaded it replaces itself with an interactive shell, so the tool call never
+returns. `agent-id use <name> --emit-shell` only prints the `cd` and is safe.
 
 `uninstall` and `rename` stay off the table unless the human asks for that exact
 operation and you have read back what it does first. Neither will stop you:
@@ -77,10 +78,11 @@ byte-identical restore — not on "the command exited 0".
 
 ## The script is self-contained
 
-`agent-id-token`, `agent-id-credential`, `agent-gh`, the commit hook, and the
-git config template are **heredocs inside `bin/agent-id`** (`write_helper_*`,
-`write_hook`, `agent_conf_template`, `signing_*_block`). `setup` writes them
-into `~/.local/bin` and `~/.config/agent-id/`.
+`agent-id-token`, `agent-id-credential`, `agent-gh`, the commit hook, the shell
+hook, and the git config template are **heredocs inside `bin/agent-id`**
+(`write_helper_*`, `write_hook`, `write_shell_hook`, `agent_conf_template`,
+`signing_*_block`). `setup` writes them into `~/.local/bin` and
+`~/.config/agent-id/`.
 
 Editing an installed copy changes nothing that ships. Edit the heredoc.
 

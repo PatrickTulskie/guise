@@ -223,17 +223,26 @@ ruleset's bypass list instead; see
 ## Daily use
 
 ```bash
-agent-id use patricktulskie-agent         # shell in ~/agentic-code/patricktulskie-agent
+agent-id use patricktulskie-agent         # cd ~/agentic-code/patricktulskie-agent
 agent-id clone patricktulskie/some-repo   # → ~/agentic-code/patricktulskie-agent/
 cd some-repo
 # ... let the agent work; commits are authored by the bot, co-authored by you
 agent-gh pr create --fill                 # opens the PR as the bot
-exit                                      # back to your own shell
 ```
 
-`agent-id use` with no name lists your identities and asks which one. It opens a
-new shell rather than moving your current one, because a command can't `cd` the
-shell that ran it — `exit` when you're done.
+`agent-id use` with no name lists your identities and asks which one.
+
+It moves the shell you're already in, which needs a small shell function that
+`setup` installs to `~/.config/agent-id/hook.sh` and sources from your `~/.zshrc`
+(or `~/.bash_profile`) between `# >>> agent-id >>>` markers. **It takes effect in
+new shells** — right after setup, either open one or `source ~/.zshrc`. Until
+then, and in any shell that doesn't load the hook, `use` opens a subshell in the
+directory instead and you leave it with `exit`.
+
+Nothing is exported. The directory is what carries the identity — git picks it
+up through `includeIf`, `agent-gh` by reading `$PWD` — so there's no stale
+variable to follow you back out of the tree. `uninstall` removes the rc lines and
+the hook.
 
 The only convention that matters: **agent clones live under `~/agentic-code/`,
 your own clones live anywhere else.** Inside that directory every git operation
@@ -248,7 +257,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `agent-id setup` | provision an identity (idempotent) |
 | `agent-id doctor` | verify everything; non-zero exit on any failure |
 | `agent-id clone <owner/repo>` | clone where the identity applies |
-| `agent-id use [name]` | open a shell in an identity's directory; asks which one if you don't say |
+| `agent-id use [name]` | cd to an identity's directory; asks which one if you don't say |
 | `agent-id update` | reinstall helpers, hook, and rendered confs from this copy of the script |
 | `agent-id token` | print the identity's token (debugging / harness use) |
 | `agent-id default [name]` | show or change the identity used when none is named |

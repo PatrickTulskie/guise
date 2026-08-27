@@ -174,6 +174,27 @@ Move (or re-clone with `agent-id clone`) the repo into
 `~/agentic-code/<identity>/`. No harness configuration exists to set; location
 is the mechanism.
 
+## `agent-id use` opens a subshell instead of moving the one you're in
+
+**Cause:** the shell hook isn't loaded. `setup` writes it to
+`~/.config/agent-id/hook.sh` and sources it from your rc, but a shell that was
+already running never read that line.
+
+Open a new shell, or `source ~/.zshrc`. `agent-id doctor` reports this as a
+`warn`, not a failure — the identity chain works either way, and the subshell
+(which you leave with `exit`) is the deliberate fallback.
+
+If it still doesn't take:
+
+- `grep agent-id ~/.zshrc` should show the sourced line between
+  `# >>> agent-id >>>` markers. Setup only edits the rc for zsh and bash; under
+  any other shell it prints the line for you to add yourself.
+- On macOS, bash reads `~/.bash_profile` rather than `~/.bashrc`, which is where
+  setup puts it.
+- `command agent-id` must resolve — the hook defines a function that shadows
+  `agent-id` and delegates to the real script, so `~/.local/bin` has to be on
+  `PATH`.
+
 ## `gh` commands act as you, not the bot
 
 Plain `gh` uses your stored login. Use `agent-gh` — it injects a bot token via

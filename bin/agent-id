@@ -19,6 +19,7 @@ OWNED_GITCONFIG="$CONFIG_DIR/gitconfig"
 RENDER_DIR="$CONFIG_DIR/git"
 HOOKS_DIR="$RENDER_DIR/agent-hooks"
 KEYS_DIR="$CONFIG_DIR/keys"
+SHELL_HOOK="$CONFIG_DIR/hook.sh"
 BIN_DIR="$HOME/.local/bin"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
 DEFAULT_BASEDIR="$HOME/agentic-code"
@@ -397,6 +398,29 @@ GH_TOKEN="$("$(cd "$(dirname "$0")" && pwd)/agent-id-token" "$IDENTITY")" exec g
 EOF
 }
 
+# Sourced into an interactive zsh/bash by a marked line in the shell rc. Only
+# `use` needs it: changing the caller's directory is something no child process
+# can do, so `use --emit-shell` prints the cd and this runs it. Everything else
+# falls through untouched, which is what keeps a broken hook from taking the
+# whole tool down with it.
+write_shell_hook() {
+  cat <<'EOF'
+# agent-id shell integration -- written by `agent-id setup`, do not edit.
+# Rewritten by `agent-id update`; edits here are lost.
+
+agent-id() {
+  if [ "${1:-}" = use ]; then
+    shift
+    local __agent_id_cd
+    __agent_id_cd=$(command agent-id use --emit-shell "$@") || return $?
+    eval "$__agent_id_cd"
+  else
+    command agent-id "$@"
+  fi
+}
+EOF
+}
+
 write_hook() {
   cat <<'EOF'
 #!/usr/bin/env bash
@@ -517,6 +541,48 @@ install_hook() {
   chmod 755 "$HOOKS_DIR/prepare-commit-msg"
 }
 
+# The rc an interactive shell of this kind actually reads. macOS terminals start
+# bash as a login shell, which reads .bash_profile and never .bashrc.
+shell_rc() {
+  case "${SHELL##*/}" in
+    zsh)  printf '%s/.zshrc' "${ZDOTDIR:-$HOME}" ;;
+    bash) if [[ "$(uname -s)" == Darwin ]]; then printf '%s/.bash_profile' "$HOME"
+          else printf '%s/.bashrc' "$HOME"; fi ;;
+    *)    return 1 ;;
+  esac
+}
+
+# Guarded so that a config dir removed by hand leaves a dead line, not a shell
+# that errors on every prompt.
+shell_block() {
+  local rel="${SHELL_HOOK#"$HOME"/}"
+  printf '%s\n[ -f "$HOME/%s" ] && . "$HOME/%s"\n%s' \
+    "$MARK_START" "$rel" "$rel" "$MARK_END"
+}
+
+install_shell_hook() {
+  local rc
+  mkdir -p "$CONFIG_DIR"
+  write_shell_hook > "$SHELL_HOOK"
+  chmod 644 "$SHELL_HOOK"
+  if ! rc=$(shell_rc); then
+    warn "unrecognized shell '${SHELL:-none}' -- source $(display_path "$SHELL_HOOK") from your shell rc to get 'agent-id use'"
+    return 0
+  fi
+  # ensure_marked_block is a no-op when the line is already there and current,
+  # so re-running setup never stacks up copies.
+  ensure_marked_block "$rc" "$(shell_block)"
+}
+
+# Uninstall can run under a different shell than setup did, so clear every rc
+# the block could have landed in rather than only this shell's.
+remove_shell_hook() {
+  local rc
+  for rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile"; do
+    remove_marked_block "$rc"
+  done
+}
+
 # Harness instructions at the top of the agent workspace. Claude Code (and
 # other harnesses that stack context files up the directory tree) pick these
 # up for every repo underneath. Never overwrites user edits.
@@ -601,26 +667,27 @@ include_block() {
     "$MARK_START" "$(display_path "$OWNED_GITCONFIG")" "$MARK_END"
 }
 
-ensure_include_block() {
-  local gitconfig="$HOME/.gitconfig" block current tmp
-  block=$(include_block)
-  touch "$gitconfig"
-  if grep -qF "$MARK_START" "$gitconfig"; then
-    current=$(awk -v s="$MARK_START" -v e="$MARK_END" '$0==s{f=1} f{print} $0==e{f=0}' "$gitconfig")
+# Both ~/.gitconfig and the shell rc get a block between the same markers, so
+# the add-or-replace and the byte-identical removal are written once.
+ensure_marked_block() { # file block
+  local file="$1" block="$2" current tmp
+  touch "$file"
+  if grep -qF "$MARK_START" "$file"; then
+    current=$(awk -v s="$MARK_START" -v e="$MARK_END" '$0==s{f=1} f{print} $0==e{f=0}' "$file")
     [[ "$current" == "$block" ]] && return 0
     tmp=$(mktemp)
     awk -v s="$MARK_START" -v e="$MARK_END" -v b="$block" \
       '$0==s{print b; f=1; next} $0==e{f=0; next} f{next} {print}' \
-      "$gitconfig" > "$tmp" && mv "$tmp" "$gitconfig"
+      "$file" > "$tmp" && mv "$tmp" "$file"
   else
-    printf '\n%s\n' "$block" >> "$gitconfig"
+    printf '\n%s\n' "$block" >> "$file"
   fi
 }
 
-remove_include_block() {
-  local gitconfig="$HOME/.gitconfig" tmp
-  [[ -f "$gitconfig" ]] || return 0
-  grep -qF "$MARK_START" "$gitconfig" || return 0
+remove_marked_block() { # file
+  local file="$1" tmp
+  [[ -f "$file" ]] || return 0
+  grep -qF "$MARK_START" "$file" || return 0
   tmp=$(mktemp)
   # Drop the block plus the single blank line setup inserted above it.
   awk -v s="$MARK_START" -v e="$MARK_END" '
@@ -629,8 +696,11 @@ remove_include_block() {
     inb   { next }
           { lines[++n]=$0 }
     END   { for (i=1; i<=n; i++) print lines[i] }
-  ' "$gitconfig" > "$tmp" && mv "$tmp" "$gitconfig"
+  ' "$file" > "$tmp" && mv "$tmp" "$file"
 }
+
+ensure_include_block() { ensure_marked_block "$HOME/.gitconfig" "$(include_block)"; }
+remove_include_block() { remove_marked_block "$HOME/.gitconfig"; }
 
 # ---------------------------------------------------------------------------
 # Commit signing (user identities only)
@@ -1052,8 +1122,10 @@ cmd_setup() {
     cfg_get core.defaultidentity >/dev/null || cfg_set core.defaultidentity "$name"
   fi
 
+  local rc_path
   install_binaries
   install_hook
+  install_shell_hook
   render_identity_conf "$name"
   regen_owned_gitconfig
   ensure_include_block
@@ -1068,6 +1140,10 @@ cmd_setup() {
   [[ -z "$want_sign" ]] || say "    commits are SSH-signed with $sign_key"
   say "    agent clones go in $base/$name/ (use 'agent-id clone <owner/repo>')"
   say "    default identity: $(default_identity)"
+  if rc_path=$(shell_rc); then
+    say "    'agent-id use' cds this shell once $(display_path "$rc_path") is reloaded"
+    say "    -- open a new shell, or: . $(display_path "$rc_path")"
+  fi
   say ""
   cmd_doctor --name "$name"
 }
@@ -1086,6 +1162,19 @@ check() { # "description" "remediation hint" fn args...
     printf '  FAIL  %s\n' "$desc"
     printf '        hint: %s\n' "$hint"
     DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+  fi
+}
+
+# Same shape as check(), but does not count towards the exit status. For things
+# that are worth telling someone about without calling the install broken --
+# the shell hook is a convenience, and declining it is a legitimate choice.
+note() { # "description" "remediation hint" fn args...
+  local desc="$1" hint="$2"; shift 2
+  if "$@" >/dev/null 2>&1; then
+    printf '  ok    %s\n' "$desc"
+  else
+    printf '  warn  %s\n' "$desc"
+    printf '        hint: %s\n' "$hint"
   fi
 }
 
@@ -1253,6 +1342,13 @@ chk_human_untouched() {
   return $rc
 }
 chk_hook() { [[ -x "$HOOKS_DIR/prepare-commit-msg" ]]; }
+
+chk_shell_hook() {
+  local rc
+  [[ -f "$SHELL_HOOK" ]] || return 1
+  rc=$(shell_rc) || return 1
+  grep -qF "$MARK_START" "$rc"
+}
 chk_binaries() { local b; for b in $HELPERS; do [[ -x "$BIN_DIR/$b" ]] || return 1; done; }
 
 cmd_doctor() {
@@ -1272,6 +1368,8 @@ cmd_doctor() {
         "re-run 'agent-id setup'" chk_binaries
   check "co-author hook installed and executable" \
         "re-run 'agent-id setup'" chk_hook
+  note  "shell hook sourced (lets 'agent-id use' cd this shell)" \
+        "re-run 'agent-id setup', or source $(display_path "$SHELL_HOOK") from your shell rc yourself" chk_shell_hook
   check "human identity untouched outside $(basedir)" \
         "something overrode global config -- inspect ~/.gitconfig for stray edits" chk_human_untouched
 
@@ -1377,6 +1475,8 @@ cmd_uninstall() {
 
   remove_include_block
   say "removed agent-id block from ~/.gitconfig"
+  remove_shell_hook
+  say "removed agent-id block from your shell rc"
 
   for b in $HELPERS agent-id; do
     rm -f "$BIN_DIR/$b"
@@ -1475,7 +1575,8 @@ cmd_update() {
 
   install_binaries
   install_hook
-  say "reinstalled $HELPERS and the commit hook"
+  install_shell_hook
+  say "reinstalled $HELPERS, the commit hook, and the shell hook"
 
   # Every identity, not just the default: a bare `setup` re-renders only the one
   # it ran for, which leaves the others on an old template.
@@ -1521,10 +1622,14 @@ cmd_default() {
 
 # A child process cannot cd its parent, so this replaces itself with a shell
 # already sitting in the directory. Leave it the way you leave any shell: exit.
+# Wrap a path so the shell hook's eval sees one word whatever is in it.
+shell_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+
 cmd_use() {
-  local name="" dir
+  local name="" emit="" dir
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --emit-shell) emit=1; shift ;;
       -*) die "use: unknown flag '$1'" ;;
       *)
         [[ -z "$name" ]] || die "use: too many arguments"
@@ -1542,11 +1647,18 @@ cmd_use() {
 
   dir="$(basedir)/$name"
   mkdir -p "$dir"
+
+  # The identity follows the directory -- git through includeIf, gh through
+  # agent-gh reading $PWD -- so landing there is the whole job. Nothing is
+  # exported, which is what keeps a later cd out of the tree from carrying a
+  # stale identity with it.
+  if [[ -n "$emit" ]]; then
+    printf 'cd %s\n' "$(shell_quote "$dir")"
+    return 0
+  fi
+
   cd "$dir"
   say "identity '$name' -- $(display_path "$dir"); exit to come back"
-  # Also exported so agent-gh and agent-id-token stay on this identity if the
-  # shell wanders outside the directory.
-  export AGENT_ID_IDENTITY="$name"
   exec "${SHELL:-/bin/sh}"
 }
 
@@ -1656,8 +1768,9 @@ usage: agent-id <command> [flags]
              <owner/repo | url> [--name <identity>]
              without --name: the identity owning the current directory,
              otherwise the default
-  use        open a shell in an identity's directory  [<name>]
-             with no name, pick one from a list
+  use        go to an identity's directory  [<name>]
+             with no name, pick one from a list; cds the current shell once
+             the shell hook is loaded, otherwise opens a subshell
   update     reinstall the helpers, hook, and rendered confs from this copy
              of the script; no credential read, no network, config untouched
   token      print the identity's token  [identity]

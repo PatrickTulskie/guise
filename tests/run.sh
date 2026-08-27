@@ -31,6 +31,9 @@ new_sandbox() {
   unset FAKE_GH_LOGIN FAKE_TOKEN_EXPIRES 2>/dev/null || true
   export OP_FAKE_ACCOUNT=my.1password.com
   unset AGENT_ID_IDENTITY AGENT_ID_CONFIG AGENT_ID_CO_AUTHOR 2>/dev/null || true
+  # Pins which rc setup writes the shell-hook line into, so the suite asserts
+  # the same path on macOS and on Linux. zsh need not be installed for this.
+  export SHELL=/bin/zsh
   git config --global user.name "Human"
   git config --global user.email "human@example.com"
   git config --global commit.gpgsign true
@@ -62,6 +65,8 @@ USER_IDENT=patrick-agent
 
 snapshot() {
   cat "$HOME/.gitconfig" \
+      "$HOME/.zshrc" \
+      "$HOME/.config/agent-id/hook.sh" \
       "$HOME/.config/agent-id/config" \
       "$HOME/.config/agent-id/gitconfig" \
       "$HOME/.config/agent-id/git/$APP_IDENT.conf" \
@@ -92,6 +97,9 @@ expect "AGENTS.md dropped in workspace" test -f "$HOME/agentic-code/AGENTS.md"
 expect "CLAUDE.md imports AGENTS.md" grep -q '@AGENTS.md' "$HOME/agentic-code/CLAUDE.md"
 expect_eq "exactly one marker block in ~/.gitconfig" \
   "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+expect "shell hook written" test -f "$HOME/.config/agent-id/hook.sh"
+expect_eq "exactly one marker block in ~/.zshrc" \
+  "$(grep -cF '# >>> agent-id >>>' "$HOME/.zshrc")" "1"
 
 # --- idempotency -------------------------------------------------------------
 echo "idempotency:"
@@ -102,6 +110,8 @@ expect_eq "re-run without --pem exits 0" "$?" "0"
 expect_eq "re-run changes no artifact" "$(snapshot)" "$snap1"
 expect_eq "still exactly one marker block" \
   "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+expect_eq "and the rc line is not stacked up either" \
+  "$(grep -cF '# >>> agent-id >>>' "$HOME/.zshrc")" "1"
 expect_eq "edited AGENTS.md not overwritten" \
   "$(cat "$HOME/agentic-code/AGENTS.md")" "custom rules"
 
@@ -398,8 +408,9 @@ chmod +x "$SB/recording-shell"
 SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use platform </dev/null >/dev/null 2>&1
 expect_eq "use lands in the named identity's directory" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
-expect_eq "and pins that identity for the shell it opens" \
-  "$(cat "$SB/use.identity")" "platform"
+# Nothing is exported: the directory is what carries the identity, so there is
+# no stale variable to follow you out of the tree.
+expect_eq "and exports nothing to go stale" "$(cat "$SB/use.identity")" ""
 
 # The list is sorted, so 1 is 'platform' -- not the default, which is what makes
 # the answer observable.
@@ -414,6 +425,44 @@ expect_eq "no name and nothing to read falls back to the default" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/$APP_IDENT"
 
 expect_fail "use refuses an unknown identity" agent use nonesuch
+
+# The shell hook: `use --emit-shell` prints the cd, the sourced function runs it
+# in the shell you are already in. Everything else falls through to the script.
+expect_eq "--emit-shell prints just the cd, shell-quoted" \
+  "$(agent use platform --emit-shell)" "cd '$HOME/agentic-code/platform'"
+expect_eq "sourcing the hook makes use cd the running bash" \
+  "$(PATH="$HOME/.local/bin:$PATH" bash -c \
+      'cd "$HOME"; . "$HOME/.config/agent-id/hook.sh"; agent-id use platform; printf %s "$PWD"')" \
+  "$HOME/agentic-code/platform"
+expect_eq "and passes every other subcommand straight through" \
+  "$(PATH="$HOME/.local/bin:$PATH" bash -c \
+      '. "$HOME/.config/agent-id/hook.sh"; agent-id default')" \
+  "$APP_IDENT"
+expect_fail "and reports failure without moving the shell" \
+  env PATH="$HOME/.local/bin:$PATH" bash -c \
+      '. "$HOME/.config/agent-id/hook.sh"; agent-id use nonesuch'
+if command -v zsh >/dev/null; then
+  expect_eq "sourcing the hook makes use cd the running zsh" \
+    "$(PATH="$HOME/.local/bin:$PATH" zsh -c \
+        'cd "$HOME"; . "$HOME/.config/agent-id/hook.sh"; agent-id use platform; printf %s "$PWD"')" \
+    "$HOME/agentic-code/platform"
+else
+  echo "  skip  sourcing the hook makes use cd the running zsh (zsh not installed)"
+fi
+
+# A shell hook nobody sourced is a missing convenience, not a broken identity,
+# so doctor says so without failing.
+printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
+agent doctor > "$SB/shellhook.out" 2>&1
+expect_eq "doctor still exits 0 with the rc line gone" "$?" "0"
+expect "and reports the shell hook as a warning, not a failure" \
+  grep -q "^  warn  shell hook" "$SB/shellhook.out"
+
+# An unrecognized shell has no rc to edit; setup must say so and carry on.
+SHELL=/usr/bin/fish run_setup --store file --name fishy > "$SB/fishy.out" 2>&1
+expect_eq "setup under an unrecognized shell still exits 0" "$?" "0"
+expect "and points at the hook to source by hand" \
+  grep -q "unrecognized shell" "$SB/fishy.out"
 
 # --- commit signing ----------------------------------------------------------
 # A separate GitHub account is a real account, so it can hold an SSH signing key
@@ -582,6 +631,7 @@ cfgfile="$HOME/.config/agent-id/config"
 cfg_before=$(shasum < "$cfgfile")
 # Clobber everything update owns; leave everything it must not touch alone.
 echo broken > "$HOME/.local/bin/agent-gh"
+echo broken > "$HOME/.config/agent-id/hook.sh"
 echo broken > "$HOME/.local/bin/agent-id-token"
 echo broken > "$confdir/agent-hooks/prepare-commit-msg"
 echo broken > "$confdir/$APP_IDENT.conf"
@@ -608,6 +658,7 @@ expect_eq "and having made no API calls at all" "$(grep -c . "$CURL_LOG")" "0"
 expect "agent-gh reinstalled" grep -q GH_TOKEN "$HOME/.local/bin/agent-gh"
 expect "token helper reinstalled" grep -q 'agent-id-token' "$HOME/.local/bin/agent-id-token"
 expect "commit hook reinstalled" grep -q 'Co-authored-by' "$confdir/agent-hooks/prepare-commit-msg"
+expect "shell hook reinstalled" grep -q 'emit-shell' "$HOME/.config/agent-id/hook.sh"
 expect_eq "config left byte-identical" "$(shasum < "$cfgfile")" "$cfg_before"
 # A bare `setup` re-renders only the identity it ran for; update does all of them.
 expect "app identity conf re-rendered" \
@@ -660,11 +711,14 @@ expect_fail "update refuses when there is no config" agent update
 # --- uninstall restores prior state ------------------------------------------
 echo "uninstall:"
 new_sandbox
+printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
 cp "$HOME/.gitconfig" "$SB/gitconfig.pre"
+cp "$HOME/.zshrc" "$SB/zshrc.pre"
 run_setup --pem "$SB/key.pem" >/dev/null 2>&1
 "$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
 expect_eq "uninstall exits 0" "$?" "0"
 expect "~/.gitconfig byte-identical to pre-setup" cmp -s "$HOME/.gitconfig" "$SB/gitconfig.pre"
+expect "~/.zshrc byte-identical to pre-setup" cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
 expect "config dir removed" test ! -e "$HOME/.config/agent-id"
 expect "token cache removed" test ! -e "$XDG_CACHE_HOME/agent-id"
 expect "helpers removed" test ! -e "$HOME/.local/bin/agent-id-token"
