@@ -353,6 +353,33 @@ expect_eq "rename refuses a name already in use" "$?" "1"
 "$ROOT/bin/agent-id" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
 
+# --- clone ---------------------------------------------------------------------
+# Real git, no network: rewrite the github.com URL clone builds to a local bare
+# repo, so what gets asserted is where the clone lands.
+echo "clone:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
+run_setup --store file --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
+mkdir -p "$SB/origins/owner"
+for r in one two three four; do git init -q --bare "$SB/origins/owner/$r.git"; done
+git config --global url."$SB/origins/".insteadOf "https://github.com/"
+
+( cd "$HOME/agentic-code/platform" && agent clone owner/one ) >/dev/null 2>&1
+expect "clone from inside an agent directory uses that agent" \
+  test -d "$HOME/agentic-code/platform/one/.git"
+expect "and not the default identity" test ! -e "$HOME/agentic-code/$APP_IDENT/one"
+( cd "$HOME/agentic-code/platform" && agent clone owner/two --name "$APP_IDENT" ) >/dev/null 2>&1
+expect "--name still wins over the current directory" \
+  test -d "$HOME/agentic-code/$APP_IDENT/two/.git"
+mkdir -p "$HOME/agentic-code/notanidentity"
+( cd "$HOME/agentic-code/notanidentity" && agent clone owner/three ) >/dev/null 2>&1
+expect "a directory under the base dir that is not an identity falls back" \
+  test -d "$HOME/agentic-code/$APP_IDENT/three/.git"
+( cd "$HOME" && agent clone owner/four ) >/dev/null 2>&1
+expect "clone from outside the base directory uses the default" \
+  test -d "$HOME/agentic-code/$APP_IDENT/four/.git"
+
 # --- commit signing ----------------------------------------------------------
 # A separate GitHub account is a real account, so it can hold an SSH signing key
 # and GitHub can mark its commits Verified. App identities cannot: there is no

@@ -255,8 +255,10 @@ the account login for an account — and that name is the directory name, so
 clones land in `~/agentic-code/patricktulskie-agent/`. Pass `--name` to
 override.
 
-Commands that don't name an identity (`agent-id token`, `agent-id clone`,
-`agent-gh` run outside the base directory) use the default, recorded in
+`agent-id clone` and `agent-gh` take the identity from the directory you're
+standing in, so inside `~/agentic-code/someorg/` you get `someorg` without
+saying so. Outside the base directory — and for commands with no directory to
+read, like `agent-id token` — they fall back to the default, recorded in
 `~/.config/agent-id/config` as `core.defaultidentity` and set to the first
 identity you provision:
 
@@ -285,6 +287,9 @@ app (e.g. on an org you belong to) needs no new key:
 agent-id setup --owner some-org --app-id 12345 --name someorg
 agent-id clone some-org/their-repo --name someorg   # → ~/agentic-code/someorg/
 ```
+
+`--name` is only needed from outside; run the same clone from inside
+`~/agentic-code/someorg/` and it picks that identity on its own.
 
 A different app entirely gets its own `--pem`:
 

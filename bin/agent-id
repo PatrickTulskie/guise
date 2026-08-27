@@ -78,6 +78,20 @@ identity_exists() {
   cfg_get "identity.$1.slug" >/dev/null 2>&1 || cfg_get "identity.$1.login" >/dev/null 2>&1
 }
 
+# The identity that owns the current directory, by the same basedir/<identity>/
+# rule the agent-gh helper uses. Standing in an agent directory is a clearer
+# statement of intent than whatever the configured default happens to be.
+identity_from_cwd() {
+  local base rel name
+  base=$(basedir)
+  case "$PWD/" in "$base"/*) ;; *) return 1 ;; esac
+  rel="${PWD#"$base"/}"
+  name="${rel%%/*}"
+  [[ -n "$name" ]] || return 1
+  identity_exists "$name" || return 1
+  printf '%s' "$name"
+}
+
 key_source() { cfg_get "identity.$1.keysource" || printf 'op'; }
 
 # Commit signing is opt-in, and user identities only: a foo[bot] account has no
@@ -1387,6 +1401,9 @@ cmd_clone() {
   [[ -f "$CONFIG_FILE" ]] || die "run 'agent-id setup' first"
 
   if [[ -z "$name" ]]; then
+    name=$(identity_from_cwd) || name=""
+  fi
+  if [[ -z "$name" ]]; then
     name=$(default_identity)
     if ! identity_exists "$name"; then
       local count
@@ -1577,6 +1594,8 @@ usage: agent-id <command> [flags]
   uninstall  remove all wiring; leaves keys + clones alone  [-y]
   clone      clone a repo into the agent directory so the identity applies
              <owner/repo | url> [--name <identity>]
+             without --name: the identity owning the current directory,
+             otherwise the default
   update     reinstall the helpers, hook, and rendered confs from this copy
              of the script; no credential read, no network, config untouched
   token      print the identity's token  [identity]
