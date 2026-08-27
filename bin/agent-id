@@ -1626,8 +1626,13 @@ cmd_default() {
 
 # A child process cannot cd its parent, so this replaces itself with a shell
 # already sitting in the directory. Leave it the way you leave any shell: exit.
-# Wrap a path so the shell hook's eval sees one word whatever is in it.
-shell_quote() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+# Wrap a path so the shell hook's eval sees one word whatever is in it. sed
+# rather than ${var//}: bash 3.2 mangles the '\'' escape in the replacement.
+shell_quote() {
+  local escaped
+  escaped=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
+  printf "'%s'" "$escaped"
+}
 
 cmd_use() {
   local name="" emit="" dir

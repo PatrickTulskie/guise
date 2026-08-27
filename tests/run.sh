@@ -481,6 +481,20 @@ else
   echo "  skip  sourcing the hook makes use cd the running zsh (zsh not installed)"
 fi
 
+# The hook evals what --emit-shell printed, so an apostrophe anywhere in the
+# path has to survive the round trip rather than ending the quoted word.
+# Emitted by /bin/bash on purpose: bash 3.2 is the floor this script targets,
+# and its pattern substitution is where the escaping goes wrong. The eval that
+# checks the result can run under any bash -- a mangled quote is a syntax error
+# in every one of them.
+quoted_base="$HOME/pat's agent-id"
+git config -f "$HOME/.config/agent-id/config" core.basedir "$quoted_base"
+emitted=$(/bin/bash "$ROOT/bin/agent-id" use platform --emit-shell </dev/null)
+expect_eq "a quote in the path survives the eval the hook does" \
+  "$(cd "$HOME" && eval "$emitted" 2>/dev/null; printf %s "$PWD")" \
+  "$quoted_base/platform"
+git config -f "$HOME/.config/agent-id/config" core.basedir "$HOME/agentic-code"
+
 # A shell hook nobody sourced is a missing convenience, not a broken identity,
 # so doctor says so without failing.
 printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
