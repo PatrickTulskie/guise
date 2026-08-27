@@ -223,11 +223,17 @@ ruleset's bypass list instead; see
 ## Daily use
 
 ```bash
+agent-id use patricktulskie-agent         # shell in ~/agentic-code/patricktulskie-agent
 agent-id clone patricktulskie/some-repo   # → ~/agentic-code/patricktulskie-agent/
-cd ~/agentic-code/patricktulskie-agent/some-repo
+cd some-repo
 # ... let the agent work; commits are authored by the bot, co-authored by you
 agent-gh pr create --fill                 # opens the PR as the bot
+exit                                      # back to your own shell
 ```
+
+`agent-id use` with no name lists your identities and asks which one. It opens a
+new shell rather than moving your current one, because a command can't `cd` the
+shell that ran it — `exit` when you're done.
 
 The only convention that matters: **agent clones live under `~/agentic-code/`,
 your own clones live anywhere else.** Inside that directory every git operation
@@ -242,6 +248,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `agent-id setup` | provision an identity (idempotent) |
 | `agent-id doctor` | verify everything; non-zero exit on any failure |
 | `agent-id clone <owner/repo>` | clone where the identity applies |
+| `agent-id use [name]` | open a shell in an identity's directory; asks which one if you don't say |
 | `agent-id update` | reinstall helpers, hook, and rendered confs from this copy of the script |
 | `agent-id token` | print the identity's token (debugging / harness use) |
 | `agent-id default [name]` | show or change the identity used when none is named |

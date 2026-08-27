@@ -37,6 +37,9 @@ you are on the machine they mean, too — `setup` writes to the `$HOME` of
 whatever host you happen to be running on, so from a cloud or container session
 you would file their PAT somewhere ephemeral and useless.
 
+`use` is harmless but not for you: it replaces itself with an interactive shell,
+so a tool call that runs it never returns.
+
 `uninstall` and `rename` stay off the table unless the human asks for that exact
 operation and you have read back what it does first. Neither will stop you:
 `rename` never confirms, and `uninstall` prompts only on a terminal — with no

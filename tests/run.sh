@@ -380,6 +380,41 @@ expect "a directory under the base dir that is not an identity falls back" \
 expect "clone from outside the base directory uses the default" \
   test -d "$HOME/agentic-code/$APP_IDENT/four/.git"
 
+# --- use ----------------------------------------------------------------------
+# `use` replaces itself with $SHELL, so stand a recording script in for one and
+# read back where it landed.
+echo "use:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
+run_setup --store file --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
+cat > "$SB/recording-shell" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$PWD" > "$SB/use.pwd"
+printf '%s\n' "\${AGENT_ID_IDENTITY:-}" > "$SB/use.identity"
+EOF
+chmod +x "$SB/recording-shell"
+
+SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use platform </dev/null >/dev/null 2>&1
+expect_eq "use lands in the named identity's directory" \
+  "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
+expect_eq "and pins that identity for the shell it opens" \
+  "$(cat "$SB/use.identity")" "platform"
+
+# The list is sorted, so 1 is 'platform' -- not the default, which is what makes
+# the answer observable.
+rm -f "$SB/use.pwd"
+printf '1\n' | SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use >/dev/null 2>&1
+expect_eq "picking by number selects that identity" \
+  "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
+
+rm -f "$SB/use.pwd"
+SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use </dev/null >/dev/null 2>&1
+expect_eq "no name and nothing to read falls back to the default" \
+  "$(cat "$SB/use.pwd")" "$HOME/agentic-code/$APP_IDENT"
+
+expect_fail "use refuses an unknown identity" agent use nonesuch
+
 # --- commit signing ----------------------------------------------------------
 # A separate GitHub account is a real account, so it can hold an SSH signing key
 # and GitHub can mark its commits Verified. App identities cannot: there is no
