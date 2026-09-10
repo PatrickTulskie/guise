@@ -173,6 +173,19 @@ expect_eq "cherry-pick keeps the original author" \
 expect_eq "and no trailer credits the human for it" \
   "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "0"
 
+# Reimplementing a contribution leaves no commit of theirs to preserve, so the
+# trailer is the only credit its author gets -- the hook clears the harness and
+# the identity's own redundant credit, and nothing else. The bot address is the
+# reason this matches whole addresses and not a pattern: it is full of regex.
+( cd "$repo" && echo w > i && git add i && git commit -q -m "reimplemented contribution
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Co-authored-by: test-agent[bot] <3333+test-agent[bot]@users.noreply.github.com>
+Co-authored-by: Contributor <c@example.com>" )
+expect_eq "the contributor and the human are the only co-authors left" \
+  "$(git -C "$repo" log -1 --format=%B | grep -i '^Co-authored-by:' | tr '\n' '|')" \
+  "Co-authored-by: Contributor <c@example.com>|Co-authored-by: Human <human@example.com>|"
+
 # A missing global identity must not abort the commit: git config exits 1 on an
 # unset key and the hook runs under set -e. Driven directly rather than through a
 # commit, so unsetting the global identity can't reorder ~/.gitconfig and leave
@@ -196,6 +209,13 @@ expect_eq "an unrelated trailer survives the strip" \
   "$(grep -c '^Signed-off-by: Someone <s@example.com>$' "$SB/msg.txt")" "1"
 expect_eq "and the harness co-author is gone, whatever its casing" \
   "$(grep -i '^Co-authored-by:' "$SB/msg.txt")" "Co-authored-by: Human <human@example.com>"
+
+# addIfDifferent compares the trailer verbatim, so a message that already
+# credits the human in another spelling would otherwise get a second one.
+printf 'a commit subject\n\nCo-Authored-By: HUMAN <Human@Example.com>\n' > "$SB/msg.txt"
+( AGENT_ID_CO_AUTHOR="Human <human@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+expect_eq "the human's own trailer is not duplicated by a different spelling" \
+  "$(grep -i -c '^Co-authored-by:' "$SB/msg.txt")" "1"
 
 # --- token cache -------------------------------------------------------------
 echo "token cache:"

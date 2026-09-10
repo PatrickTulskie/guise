@@ -45,8 +45,11 @@ this one stood down when it saw one — `git interpret-trailers` matches on the
 trailer token alone and never looks at who is named, so any co-author at all
 meant yours was never added.
 
-The current hook clears every other `Co-authored-by` first, then adds yours. It
-is written out at install time, so a newer script does nothing on its own:
+The current hook clears the harness trailers by address — the harnesses' own,
+and the identity's, which the commit is already authored by — then adds yours.
+Any other co-author is left standing, so a trailer that credits a contributor
+whose work you reimplemented survives. It is written out at install time, so a
+newer script does nothing on its own:
 
 ```bash
 git pull && ./bin/agent-id update

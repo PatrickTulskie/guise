@@ -475,11 +475,32 @@ fi
 # Harnesses stamp a co-author of their own (Claude, Cursor). The commit is
 # already authored by the agent identity, so that credit is redundant -- and
 # interpret-trailers matches on the token alone, so any of them would make it
-# skip the human's. Clear the token out by hand: --if-exists replace compares
-# the token case-sensitively and so walks straight past 'Co-Authored-By:',
-# which is how both of them spell it.
+# skip the human's. Clear those out by hand, by address: --if-exists replace
+# compares the token case-sensitively and so walks straight past
+# 'Co-Authored-By:', which is how both of them spell it.
+#
+# By address and not by token, because a co-author who is neither a harness nor
+# the identity is the real thing -- on a reimplemented contribution the trailer
+# is the only credit its author gets. The human's own goes on the list too, so
+# whatever spelling it arrived in is replaced by the canonical one below.
+# Space-separated, since BSD awk rejects a newline inside a -v value.
+HUMAN_ADDR="${CO_AUTHOR##*<}"
+DROP_ADDRS="noreply@anthropic.com cursoragent@cursor.com ${SELF_EMAIL} ${HUMAN_ADDR%>}"
+
 STRIPPED="$MSG_FILE.agent-id"
-grep -vi '^Co-authored-by:' "$MSG_FILE" > "$STRIPPED" || true
+awk -v drop="$DROP_ADDRS" '
+  BEGIN {
+    n = split(drop, a, " ")
+    for (i = 1; i <= n; i++) if (a[i] != "") mine[tolower(a[i])] = 1
+  }
+  tolower($0) ~ /^co-authored-by:/ {
+    addr = $0
+    sub(/^[^<]*</, "", addr)
+    sub(/>.*/, "", addr)
+    if (tolower(addr) in mine) next
+  }
+  { print }
+' "$MSG_FILE" > "$STRIPPED" || true
 if [[ -s "$STRIPPED" ]]; then
   mv "$STRIPPED" "$MSG_FILE"
 else
