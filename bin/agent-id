@@ -436,6 +436,26 @@ COMMIT_SOURCE="${2:-}"
 # Skip merges and squashes -- trailers there are noise.
 [[ "$COMMIT_SOURCE" == "merge" || "$COMMIT_SOURCE" == "squash" ]] && exit 0
 
+# The identity's own address, which is also what a commit it authored carries.
+# Unset outside a repo, and git config exits 1 there, so absence is legitimate.
+SELF_EMAIL=$(git config --get user.email 2>/dev/null || true)
+
+# A replay is someone else's commit passing through -- cherry-pick, revert, a
+# rebase, or an explicit --author. The identity is only the committer, so the
+# human co-authored nothing, and the message already carries whatever credit
+# the original commit was due.
+GIT_DIR_PATH=$(git rev-parse --git-dir 2>/dev/null || true)
+if [[ -n "$GIT_DIR_PATH" ]]; then
+  for marker in CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+    if [[ -e "$GIT_DIR_PATH/$marker" ]]; then exit 0; fi
+  done
+fi
+# Cherry-pick leaves GIT_AUTHOR_EMAIL unset, so this catches --author, not that.
+if [[ -n "${GIT_AUTHOR_EMAIL:-}" && -n "$SELF_EMAIL" \
+      && "$GIT_AUTHOR_EMAIL" != "$SELF_EMAIL" ]]; then
+  exit 0
+fi
+
 CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
 CO_AUTHOR="${AGENT_ID_CO_AUTHOR:-}"
 if [[ -z "$CO_AUTHOR" && -f "$CONFIG" ]]; then

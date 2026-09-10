@@ -56,6 +56,23 @@ git pull && ./bin/agent-id update
 there, not that it is the current one — if a commit still credits the harness
 after an update, check the message the harness passed to `git commit`.
 
+## The trailer credits you on a commit you didn't write
+
+**Cause:** an old commit hook, which added the trailer to every commit the
+identity made — including ones it was only replaying. Adopting an outside
+contributor's patch keeps them as author and the bot as committer, and the
+trailer then named a third person on a change none of them wrote.
+
+The current hook stands down on a replay: a cherry-pick, a revert, a rebase, or
+a `--author` that isn't the identity's own address. Update to get it:
+
+```bash
+git pull && ./bin/agent-id update
+```
+
+Credit that a replayed commit already carries is left as it is — the hook only
+adds your trailer to commits the identity actually authored.
+
 ## Push rejected: signed commits required
 
 **Cause:** the repo (or its org) has a signature ruleset and the agent isn't

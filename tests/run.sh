@@ -160,6 +160,19 @@ expect_eq "harness co-author replaced by the human" \
   "$(git -C "$repo" log -1 --format=%B | grep -i '^Co-authored-by:')" \
   "Co-authored-by: Human <human@example.com>"
 
+# Replaying someone else's commit makes the identity its committer, not an
+# author. Crediting the human there claims a share of a patch neither of them
+# wrote -- once via --author, and once via the cherry-pick that adopts it.
+( cd "$repo" && git checkout -q -b outside HEAD~1 && echo z > h && git add h \
+  && git commit -q -m "outside contribution" --author="Outsider <out@example.com>" )
+expect_eq "no trailer on a commit made with --author" \
+  "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "0"
+( cd "$repo" && git checkout -q - && git cherry-pick outside >/dev/null )
+expect_eq "cherry-pick keeps the original author" \
+  "$(git -C "$repo" log -1 --format='%an')" "Outsider"
+expect_eq "and no trailer credits the human for it" \
+  "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "0"
+
 # A missing global identity must not abort the commit: git config exits 1 on an
 # unset key and the hook runs under set -e. Driven directly rather than through a
 # commit, so unsetting the global identity can't reorder ~/.gitconfig and leave
