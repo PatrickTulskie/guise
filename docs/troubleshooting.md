@@ -37,6 +37,25 @@ Re-run `agent-id setup` — it rediscovers the bot user ID from
 `GET /users/<slug>%5Bbot%5D` and re-renders the conf. `doctor` has a dedicated
 check for this ("app id != bot user id").
 
+## The commit credits the harness instead of you
+
+**Cause:** an old commit hook. Claude Code and Cursor stamp a `Co-Authored-By`
+of their own into the message they hand git, and the hook that shipped before
+this one stood down when it saw one — `git interpret-trailers` matches on the
+trailer token alone and never looks at who is named, so any co-author at all
+meant yours was never added.
+
+The current hook clears every other `Co-authored-by` first, then adds yours. It
+is written out at install time, so a newer script does nothing on its own:
+
+```bash
+git pull && ./bin/agent-id update
+```
+
+`doctor`'s "co-author hook installed and executable" check proves a hook is
+there, not that it is the current one — if a commit still credits the harness
+after an update, check the message the harness passed to `git commit`.
+
 ## Push rejected: signed commits required
 
 **Cause:** the repo (or its org) has a signature ruleset and the agent isn't

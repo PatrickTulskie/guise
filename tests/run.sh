@@ -150,6 +150,16 @@ expect_eq "co-author trailer added on commit -m" \
 expect_eq "trailer not duplicated on --amend" \
   "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "1"
 
+# A harness hands git a message that already credits itself. The human has to
+# displace that, not defer to it -- interpret-trailers on its own defers,
+# because it matches the token and never looks at who is named.
+( cd "$repo" && echo y > g && git add g && git commit -q -m "harness commit
+
+Co-Authored-By: Cursor Agent <cursoragent@cursor.com>" )
+expect_eq "harness co-author replaced by the human" \
+  "$(git -C "$repo" log -1 --format=%B | grep -i '^Co-authored-by:')" \
+  "Co-authored-by: Human <human@example.com>"
+
 # A missing global identity must not abort the commit: git config exits 1 on an
 # unset key and the hook runs under set -e. Driven directly rather than through a
 # commit, so unsetting the global identity can't reorder ~/.gitconfig and leave
@@ -165,6 +175,14 @@ printf 'a commit subject\n' > "$SB/msg.txt"
 ( AGENT_ID_CO_AUTHOR="Someone <s@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
 expect_eq "and still adds the trailer when one is available" \
   "$(grep -c '^Co-authored-by: Someone <s@example.com>$' "$SB/msg.txt")" "1"
+
+# Clearing the co-author token is not licence to touch the rest of the block.
+printf 'a commit subject\n\nSigned-off-by: Someone <s@example.com>\nCo-Authored-By: Claude <noreply@anthropic.com>\n' > "$SB/msg.txt"
+( AGENT_ID_CO_AUTHOR="Human <human@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+expect_eq "an unrelated trailer survives the strip" \
+  "$(grep -c '^Signed-off-by: Someone <s@example.com>$' "$SB/msg.txt")" "1"
+expect_eq "and the harness co-author is gone, whatever its casing" \
+  "$(grep -i '^Co-authored-by:' "$SB/msg.txt")" "Co-authored-by: Human <human@example.com>"
 
 # --- token cache -------------------------------------------------------------
 echo "token cache:"

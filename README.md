@@ -26,8 +26,10 @@ commits; see [Signed commits](#signed-commits).
 
 Gives your coding agents (Claude Code, Cursor) their own GitHub identity. Agent
 commits land as `your-app[bot]` with you as co-author, instead of impersonating
-you. Everything is scoped to one directory — by default `~/agentic-code/` — and
-your own git identity is never touched.
+you — and with you as the *only* co-author, since a commit hook clears the
+`Co-Authored-By` a harness stamps for itself. Everything is scoped to one
+directory — by default `~/agentic-code/` — and your own git identity is never
+touched.
 
 That identity can be a **GitHub App bot** (below — the better default) or a
 **[separate GitHub account](#a-separate-github-account-instead-of-an-app)**.

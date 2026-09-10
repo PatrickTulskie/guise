@@ -149,8 +149,8 @@ are the reason this tool can be handed to someone else.
 ## Commits and PRs
 
 One line, imperative, saying why rather than what. No multi-line bodies, and no
-trailers you write yourself — a hook adds the human co-author, and a
-hand-written one suppresses it.
+trailers you write yourself — a hook makes the human the sole co-author, and
+clears every other `Co-authored-by`, including one you added.
 
 Stage the files you actually changed. Never `git add .` or `git add -A`: in a
 repo whose whole subject is credential handling, a blind stage is how a stray
