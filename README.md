@@ -11,10 +11,19 @@ leaving an honest trail. This framework sets that up alongside your regular
 git configuration, without disturbing it.
 
 If you're a human, you don't have to read the rest of this README. Clone the
-repo, hand it to your harness of choice, and tell it to set up your machine. You
-need the GitHub side first — an account or app for the agent, and a credential
-issued from it; that's the only part nobody can automate for you. After that it
-should be as simple as:
+repo and run setup with no arguments — it asks for what it needs, walks you
+through the GitHub-side steps that have to happen in a browser, and waits:
+
+```bash
+./bin/guise setup
+```
+
+Or hand the repo to your harness of choice and tell it to set up your machine.
+Either way you need the GitHub side first — an account or app for the agent,
+and a credential issued from it; that's the only part nobody can automate for
+you.
+
+Know the flags already? Pass them and the questions don't happen:
 
 ```bash
 ./bin/guise setup --kind user --login your-agent-account
@@ -23,6 +32,26 @@ should be as simple as:
 `setup` prompts for the PAT — there is deliberately no `--token` flag, since
 argv is visible in `ps`. Add `--sign` if the repos you work in require signed
 commits; see [Signed commits](#signed-commits).
+
+### Guided or flag-driven
+
+A bare `guise setup` **on a terminal** asks for the answers. With any flag, or
+with nothing attached to stdin, it takes flags and fails on a missing one — so
+scripted installs and re-runs from a harness behave exactly as they always
+have. `--wizard` forces the questions, `--no-wizard` insists on flags.
+
+The questions only fill in the flags; one code path does the provisioning
+either way. What the guided path adds is the parts that aren't flags: it names
+the machine and home directory it is about to write to before it writes
+anything, prints the browser steps as a checklist and waits rather than
+pretending to automate them, and re-asks anything it can check locally — a
+non-numeric App ID, a path with no private key at it, a 1Password vault it
+can't reach — instead of failing at the end.
+
+What it can't check locally is the credential itself: that takes the GitHub
+call `setup` already makes. Nothing has been written to disk by the time it
+runs, so a rejected token or a wrong App ID costs you the questions again and
+nothing else.
 
 ## Introduction
 
@@ -262,7 +291,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 
 | Command | What it does |
 |---|---|
-| `guise setup` | provision an identity (idempotent) |
+| `guise setup` | provision an identity (idempotent); asks for the answers when given no flags on a terminal |
 | `guise doctor` | verify everything; non-zero exit on any failure |
 | `guise clone <owner/repo>` | clone where the identity applies |
 | `guise use [name]` | cd to an identity's directory; the default one if you don't say |

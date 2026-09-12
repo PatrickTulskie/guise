@@ -1008,6 +1008,112 @@ expect "uninstall leaves the signing key alone" \
 expect "and names the public half still on the account" \
   grep -q 'public signing key on the agent account' "$SB/uninstall.out"
 
+# --- guided setup --------------------------------------------------------------
+# The wizard reads its answers from stdin whether or not that is a terminal, so
+# the suite walks the same prompts a human does. Answers are positional, and
+# each block below lists them in order.
+echo "guided setup:"
+
+# machine, kind, app-exists, owner, app id, pem, browser pause, store, name,
+# workspace, go
+wizard() { "$ROOT/bin/guise" setup --wizard; }
+
+new_sandbox
+printf 'y\napp\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \
+  | wizard >/dev/null 2>&1
+expect_eq "a guided app setup exits 0" "$?" "0"
+# The whole design claim: the wizard only fills in flags, so it has to land the
+# byte-identical config a flag-driven setup would.
+expect_eq "app metadata still discovered from the API" "$(cfg identity.$APP_IDENT.slug)" "test-agent"
+expect_eq "installation id discovered" "$(cfg identity.$APP_IDENT.installationid)" "2222"
+expect_eq "the store chosen at the prompt is honoured" \
+  "$(cfg identity.$APP_IDENT.keysource)" "file"
+expect "the PEM is shredded like any other" test ! -e "$SB/key.pem"
+expect "identity dir created" test -d "$HOME/agentic-code/$APP_IDENT"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes on a guided install" "$?" "0"
+
+# A second app identity: the stored key is offered rather than asked for, so
+# there is no pem answer here -- reuse, browser pause, store, name, ...
+printf 'y\nn\napp\ny\npatricktulskie\n1111\ny\nok\nfile\nsecond\n\nn\ny\n' \
+  | wizard >/dev/null 2>&1
+expect_eq "a second identity for the same app exits 0" "$?" "0"
+expect "and reuses the stored key without asking for a PEM" test -d "$HOME/agentic-code/second"
+expect_eq "without stealing the default" "$(cfg core.defaultidentity)" "$APP_IDENT"
+
+# A name and a workspace typed at the prompts, rather than derived.
+new_sandbox
+printf 'y\napp\ny\npatricktulskie\n1111\n%s\nok\nfile\nchosen\n%s\ny\n' \
+  "$SB/key.pem" "$HOME/elsewhere" | wizard >/dev/null 2>&1
+expect "an answered name becomes the identity" test -d "$HOME/elsewhere/chosen"
+expect_eq "and an answered workspace becomes the basedir" "$(cfg core.basedir)" "$HOME/elsewhere"
+
+# Declining at the summary, or at the first question, has to leave no trace --
+# the whole point of asking before doing anything.
+new_sandbox
+printf 'y\napp\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\nn\n' "$SB/key.pem" \
+  | wizard >/dev/null 2>&1
+expect_eq "declining at the summary fails" "$?" "1"
+expect "and writes no config" test ! -e "$HOME/.config/guise/config"
+expect "and leaves the PEM alone" test -f "$SB/key.pem"
+printf 'n\n' | wizard >/dev/null 2>&1
+expect_eq "so does answering the wrong machine" "$?" "1"
+expect "with nothing written" test ! -e "$HOME/.config/guise/config"
+
+# Anything checkable without the network is re-asked, not fatal: a bad choice,
+# a non-numeric app id, and a path with no key at it.
+printf 'y\nmaybe\napp\ny\npatricktulskie\nnotanumber\n1111\n/nonesuch.pem\n%s\nok\nfile\n\n\ny\n' \
+  "$SB/key.pem" | wizard >/dev/null 2>&1
+expect_eq "a bad choice, app id, and PEM path are all re-asked" "$?" "0"
+expect_eq "and the run still completes correctly" "$(cfg identity.$APP_IDENT.installationid)" "2222"
+
+# machine, kind, account-exists, login, org-member, browser pause, token, sign,
+# store, name, workspace, go
+new_sandbox
+printf 'y\nuser\ny\npatrick-agent\ny\nok\ngithub_pat_wizard\ny\nfile\n\n\ny\n' \
+  | wizard >/dev/null 2>&1
+# Non-zero, and correctly so: signing was turned on at the prompt and the key
+# is not on the account yet, which is the browser step setup prints at the end.
+expect_eq "a guided account setup ends on the one gap it can't close" "$?" "1"
+expect_eq "kind recorded" "$(cfg identity.$USER_IDENT.kind)" "user"
+expect_eq "user id discovered from the API" "$(cfg identity.$USER_IDENT.userid)" "4444"
+# Typed at the prompt, carried in the process, stored once: never in argv and
+# never in a file of its own on the way there.
+expect_eq "the pasted token is what got stored" \
+  "$(cat "$HOME/.config/guise/keys/$USER_IDENT.token")" "github_pat_wizard"
+expect_eq "signing turned on at the prompt" "$(cfg identity.$USER_IDENT.signing)" "ssh"
+expect "signing key generated" test -f "$HOME/.config/guise/keys/$USER_IDENT.signing"
+printf '%s\n' "$(awk '{print $1" "$2}' "$HOME/.config/guise/keys/$USER_IDENT.signing.pub")" \
+  >> "$SIGNING_KEYS_FILE"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes on a guided account install" "$?" "0"
+
+# Re-running for an identity that exists asks which one and nothing else: every
+# other answer is already in the config, and a bare re-run is the documented
+# repair action.
+snap_guided=$(snapshot)
+printf 'y\ny\n%s\n' "$USER_IDENT" | wizard >/dev/null 2>&1
+expect_eq "re-running an existing identity through the wizard exits 0" "$?" "0"
+expect_eq "and changes nothing" "$(snapshot)" "$snap_guided"
+
+# --wizard alongside flags asks only for what the flags did not answer, so the
+# two ways of driving setup compose instead of one overriding the other.
+new_sandbox
+printf 'y\ny\nok\n\n\ny\n' | "$ROOT/bin/guise" setup --wizard \
+  --kind app --owner patricktulskie --app-id 1111 --pem "$SB/key.pem" \
+  --store file >/dev/null 2>&1
+expect_eq "--wizard with flags exits 0" "$?" "0"
+expect_eq "the flags are taken, not re-asked" "$(cfg identity.$APP_IDENT.appid)" "1111"
+expect_eq "including the store" "$(cfg identity.$APP_IDENT.keysource)" "file"
+
+# The wizard is what a bare setup does *on a terminal*. With no terminal there
+# is nothing to ask, so the flag-driven refusal stands.
+new_sandbox
+expect_fail "a bare setup with no terminal still refuses rather than prompting" agent setup
+expect "and writes no config" test ! -e "$HOME/.config/guise/config"
+expect_fail "there is still no --token flag to pass" \
+  agent setup --kind user --token github_pat_nope
+
 # --- update ------------------------------------------------------------------
 # Picking up a new version must work with the vault locked and the network down,
 # which is the whole reason this exists instead of "just re-run setup".

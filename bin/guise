@@ -956,12 +956,316 @@ shred_signing_key() { # <private key path>
 }
 
 # ---------------------------------------------------------------------------
+# Guided setup
+# ---------------------------------------------------------------------------
+
+# openssl only signs App JWTs, so a user-identity-only install never needs it.
+# doctor's dependency check has to stay in step with this list.
+require_deps() { # kind
+  local dep deps="gh jq git curl"
+  [[ "$1" != "app" ]] || deps="$deps openssl"
+  for dep in $deps; do
+    command -v "$dep" >/dev/null || die "missing dependency: $dep"
+  done
+}
+
+# The wizard's prompts read stdin whether or not it is a terminal. ask() and
+# ask_secret() deliberately do not -- they fall back to a default, or refuse,
+# when nothing is attached, which is what keeps a flag-driven setup inside a
+# script from blocking on a prompt. Here the prompts *are* the input, so
+# reading a pipe is the correct behavior, and is how the suite walks the same
+# path a human does.
+#
+# These assign through the caller's variable name, so their own locals are
+# underscore-prefixed: bash scoping is dynamic, and a local sharing a name with
+# the caller's variable would have the callee assign to itself instead.
+wz_ask() { # varname "prompt" [default] -- non-zero on EOF
+  local _var="$1" _val="" _rc=0
+  if [[ -n "${3:-}" ]]; then printf '%s [%s]: ' "$2" "$3" >&2
+  else printf '%s: ' "$2" >&2; fi
+  IFS= read -r _val || _rc=1
+  [[ -n "$_val" ]] || _val="${3:-}"
+  eval "$_var=\"\$_val\""
+  return $_rc
+}
+
+wz_require() { # varname "prompt" [default] -- re-asks until there is an answer
+  local _var="$1" _got=""
+  while :; do
+    wz_ask _got "$2" "${3:-}" || die "setup: ran out of input at '$2'"
+    [[ -z "$_got" ]] || break
+    say "  that one is required"
+  done
+  eval "$_var=\"\$_got\""
+}
+
+# Hidden on a terminal, plain from a pipe -- there is nothing to hide from a
+# pipe, and it is what lets the suite drive this prompt. Never reaches argv.
+wz_secret() { # varname "prompt" -- non-zero on EOF
+  local _var="$1" _val="" _rc=0
+  printf '%s: ' "$2" >&2
+  if [[ -t 0 ]]; then
+    IFS= read -r -s _val || _rc=1
+    printf '\n' >&2
+  else
+    IFS= read -r _val || _rc=1
+  fi
+  eval "$_var=\"\$_val\""
+  return $_rc
+}
+
+wz_yes() { # "prompt" <y|n> -- the second argument is the default
+  local _ans
+  while :; do
+    wz_ask _ans "$1 (y/n)" "$2" || die "setup: ran out of input at '$1'"
+    case "$(lower "$_ans")" in
+      y|yes) return 0 ;;
+      n|no)  return 1 ;;
+      *) say "  answer y or n" ;;
+    esac
+  done
+}
+
+wz_choose() { # varname "prompt" <choice>... -- the first choice is the default
+  local _var="$1" _prompt="$2"; shift 2
+  local _all="$*" _def="$1" _pick="" _c
+  say ""
+  say "$_prompt"
+  while :; do
+    wz_ask _pick "  $(printf '%s' "$_all" | tr ' ' '/')" "$_def" \
+      || die "setup: ran out of input at a choice of $_all"
+    for _c in $_all; do
+      if [[ "$(lower "$_pick")" == "$_c" ]]; then
+        eval "$_var=\"\$_c\""
+        return 0
+      fi
+    done
+    say "  pick one of: $_all"
+  done
+}
+
+# The steps with no API behind them. Printed as a checklist and waited on rather
+# than folded into the narration: claiming to have done a browser step is how
+# someone ends up debugging a missing installation instead of re-reading a step
+# they skipped.
+wz_browser() { # "line"...
+  local _line _ignored
+  say ""
+  say "  -- in a browser, then come back ------------------------------------"
+  for _line in "$@"; do say "  $_line"; done
+  wz_ask _ignored "press return once that is done" "ok" \
+    || die "setup: ran out of input"
+}
+
+# Fills in the flags a flag-driven `setup` would have been given, then returns
+# and lets that one path do the work -- so there is one provisioning
+# implementation, and the wizard is only a way of answering it. Assigns to
+# cmd_setup's locals directly, which bash's dynamic scoping allows and which is
+# the same trick ask() uses.
+#
+# Everything checkable without the network is checked in a re-ask loop here, so
+# a typo costs one prompt instead of the whole run. What is left is the GitHub
+# API -- and nothing has been written to disk by the time those calls run, so a
+# rejected credential means re-running, not repairing.
+wizard_setup() {
+  local existing="" repair="" reuse="" pem_ok=""
+
+  say "guise setup, guided. Answers become the flags; ^C to stop."
+  say ""
+  say "This writes to the home directory of the machine it runs on:"
+  say "  $(display_path "$CONFIG_DIR")  config, rendered git confs, commit hook"
+  say "  $(display_path "$BIN_DIR")  guise, guise-token, guise-credential, guise-gh"
+  say "  ~/.gitconfig  one include block between markers"
+  say "  host $(uname -n), home $HOME"
+  wz_yes "Right machine?" y || die "nothing written -- run this on the machine that does the work"
+
+  existing=$(list_identities)
+  if [[ -n "$existing" ]]; then
+    say ""
+    say "identities already set up: $(printf '%s' "$existing" | tr '\n' ' ')"
+    if wz_yes "Re-run setup for one of those instead of adding a new one?" n; then
+      wz_require repair "which one" "$(default_identity)"
+      identity_exists "$repair" || die "identity '$repair' not in config"
+      # Every other answer is already in the config, and a bare re-run is the
+      # advertised repair action, so there is nothing left to ask.
+      name="$repair"
+      kind=$(identity_kind "$repair")
+      say ""
+      say "re-running for '$repair' with its stored settings"
+      return 0
+    fi
+  fi
+
+  [[ -z "$kind" ]] || say "kind: $kind (given)"
+  [[ -n "$kind" ]] || wz_choose kind \
+    "What kind of identity? 'app' is a GitHub App bot -- one credential, works
+  only on repos where the app is installed. 'user' is a separate GitHub account
+  with a PAT -- can be given access anywhere, costs a seat in a paid org." \
+    app user
+  require_deps "$kind"
+
+  if [[ "$kind" == "app" ]]; then
+    if ! wz_yes "Is the GitHub App created already?" y; then
+      wz_browser \
+        "Settings -> Developer settings -> GitHub Apps -> New GitHub App" \
+        "  name it <yourname>-agent (globally unique)" \
+        "  Webhook: uncheck Active" \
+        "  Where can it be installed: Any account" \
+        "  Repository permissions: Contents R/W, Pull requests R/W," \
+        "    Issues R/W, Checks Read, Workflows no access" \
+        "Then: Generate a private key (downloads a .pem), and note the App ID"
+    fi
+    [[ -n "$owner" ]] || wz_require owner "GitHub account (user or org) the app is installed on"
+    local num_re='^[0-9]+$'
+    while [[ ! "$app_id" =~ $num_re ]]; do
+      [[ -z "$app_id" ]] \
+        || say "  the App ID is a number -- not the client ID, and not the app name"
+      wz_require app_id "App ID (top of the app settings page)"
+    done
+
+    # A second installation of an app already set up needs no new key, which is
+    # worth offering: the download is one-time-only on GitHub's side.
+    reuse=$(find_identity_by_appid "$app_id") || reuse=""
+    if [[ -n "$reuse" ]]; then
+      say ""
+      say "app $app_id already has a stored key (identity '$reuse')"
+      if wz_yes "Reuse it?" y; then pem=""; else reuse=""; fi
+    fi
+    if [[ -z "$reuse" && -z "$pem" ]]; then
+      while :; do
+        wz_require pem "Path to the downloaded .pem"
+        case "$pem" in "~/"*) pem="$HOME/${pem#\~/}" ;; esac
+        pem_ok=""
+        if [[ ! -f "$pem" ]]; then say "  no file at $pem"
+        elif ! openssl pkey -in "$pem" -noout 2>/dev/null; then
+          say "  $pem is not a private key -- that download is the .pem, not the app page"
+        else pem_ok=1; fi
+        [[ -z "$pem_ok" ]] || break
+      done
+      say "  the .pem is shredded once its key is stored"
+    fi
+
+    wz_browser \
+      "App settings -> Install App -> $owner" \
+      "  pick All repositories, or just the ones the agent works in" \
+      "If any of those repos requires signed commits, add the app to the" \
+      "ruleset's bypass list (Settings -> Rules -> Rulesets -> Bypass list" \
+      "-> Apps -> Always), or the first push is rejected"
+  else
+    if ! wz_yes "Does the agent's GitHub account exist already?" y; then
+      wz_browser \
+        "Sign up for a normal GitHub account with its own email address" \
+        "(GitHub's terms allow one machine account per person)"
+    fi
+    [[ -n "$login" ]] || wz_require login "The agent account's login"
+    if [[ "$(lower "$login")" == "$(lower "$(gh api user --jq .login 2>/dev/null || true)")" ]]; then
+      die "that is your own account -- the agent needs an account of its own"
+    fi
+
+    say ""
+    say "Access matters more than it looks: a fine-grained PAT only reaches"
+    say "repos owned by the resource owner it was issued for, and the picker"
+    say "lists an org only if @$login is a MEMBER of it. Added as an outside"
+    say "collaborator, @$login can only issue a token scoped to itself, which"
+    say "reaches nothing the org owns -- with write access to the repo."
+    if ! wz_yes "Is @$login already a member of the org (or are the repos its own)?" y; then
+      wz_browser \
+        "Add @$login to a team in the org (this costs a seat in a paid org)" \
+        "Can't? A classic PAT with the 'repo' scope honors outside-collaborator" \
+        "access without a seat, at the cost of per-repo selection"
+    fi
+
+    reuse=$(find_identity_by_login "$login") || reuse=""
+    if [[ -n "$token_file" ]]; then
+      say ""
+      say "token: reading $token_file (given), which is shredded after storing"
+    elif [[ -n "$reuse" ]] && wz_yes "A token for @$login is already stored -- reuse it?" y; then
+      : # the main path finds it by login, exactly as a bare re-run does
+    else
+      wz_browser \
+        "Signed in AS @$login: Settings -> Developer settings ->" \
+        "Personal access tokens -> Fine-grained tokens -> Generate new token" \
+        "  Resource owner: whoever OWNS the repos -- the org, not @$login" \
+        "  Repository access: only the repos the agent works in" \
+        "  Permissions: Contents R/W, Pull requests R/W, Issues R/W" \
+        "  Expiration: whatever you will actually rotate (doctor fails 30 days out)" \
+        "Copy the token; it is shown once"
+      # Straight into a variable in this process: never in argv, and never
+      # written to disk on the way to being stored.
+      wz_secret wizard_token "Paste the token (not echoed)" \
+        || die "setup: no token on stdin"
+      [[ -n "$wizard_token" ]] || die "setup: empty token"
+    fi
+
+    if [[ -z "$sign" ]]; then
+      say ""
+      say "Signing is worth it if the repos require signed commits. The key is"
+      say "generated here and stays here; registering its public half is a"
+      say "browser step on @$login, which setup prints at the end."
+      if wz_yes "SSH-sign this identity's commits?" n; then sign=1; else sign=0; fi
+    fi
+  fi
+
+  [[ -n "$store" ]] || wz_choose store \
+    "Where should the credential live? 'op' is 1Password, read on demand -- a
+  locked vault then blocks the agent. 'file' is mode 600 under
+  $(display_path "$KEYS_DIR"), which suits an agent that runs unattended." \
+    op file
+  if [[ "$store" == "op" ]]; then
+    command -v op >/dev/null \
+      || die "the 1Password CLI (op) is not installed -- re-run and choose 'file'"
+    while :; do
+      wz_require vault "1Password vault" "$vault"
+      if [[ -n "$op_account" ]]; then
+        op --account "$op_account" vault get "$vault" >/dev/null 2>&1 && break
+      else
+        op vault get "$vault" >/dev/null 2>&1 && break
+      fi
+      say "  can't reach vault '$vault' -- not signed in (op signin), or no such vault"
+    done
+  fi
+
+  # Empty is a real answer here: it means "name it after the account", which is
+  # what setup does with no --name. The name pattern is checked by cmd_setup
+  # either way, so a bad one dies there with the same message a flag gets.
+  [[ -n "$name" ]] \
+    || wz_ask name "Identity name, or empty to name it after the account" \
+    || die "setup: ran out of input"
+  [[ -n "$base" ]] || wz_require base "Workspace directory for the clones" "$(basedir)"
+  case "$base" in "~") base="$HOME" ;; "~/"*) base="$HOME/${base#\~/}" ;; esac
+
+  if [[ -z "$make_default" && -n "$existing" ]] \
+     && wz_yes "Make this the identity commands fall back to?" n; then
+    make_default=1
+  fi
+
+  say ""
+  say "  kind:       $kind"
+  if [[ "$kind" == "app" ]]; then
+    say "  app:        $app_id on $owner"
+    [[ -z "$pem" ]] || say "  key:        $pem (shredded after storing)"
+    [[ -z "$reuse" ]] || say "  key:        reusing the one stored for '$reuse'"
+  else
+    say "  account:    @$login"
+    say "  signing:    $([[ "$sign" == "1" ]] && echo "on" || echo "off")"
+  fi
+  say "  credential: $store$([[ "$store" == "op" ]] && printf ' (vault %s)' "$vault")"
+  say "  name:       ${name:-derived from the account}"
+  say "  workspace:  $(display_path "$base")/<identity>/"
+  say ""
+  wz_yes "Go?" y || die "nothing written"
+}
+
+# ---------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------
 
 cmd_setup() {
   local owner="" app_id="" pem="" name="" vault="$VAULT" coauthor="" base="" op_account="" store=""
   local kind="" login="" token_file="" make_default="" sign=""
+  # Set by the wizard only: a token it read from its own prompt, carried in
+  # this process rather than through argv or a file on the way to its store.
+  local wizard="" wizard_token="" argc=$#
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --kind)       kind="$2"; shift 2 ;;
@@ -979,6 +1283,8 @@ cmd_setup() {
       --coauthor)   coauthor="$2"; shift 2 ;;
       --base-dir)   base="$2"; shift 2 ;;
       --default)    make_default=1; shift ;;
+      --wizard)     wizard=1; shift ;;
+      --no-wizard)  wizard=0; shift ;;
       --sign)       sign=1; shift ;;
       --no-sign)    sign=0; shift ;;
       --token)      die "there is no --token flag on purpose -- argv lands in ps output and shell history; use --token-file, or let setup prompt" ;;
@@ -989,6 +1295,13 @@ cmd_setup() {
   op_do() {
     if [[ -n "$op_account" ]]; then op --account "$op_account" "$@"; else op "$@"; fi
   }
+
+  # A bare `setup` on a terminal has nothing to go on, and dying at the first
+  # `ask` teaches nobody which flags they needed -- so it asks for the answers
+  # instead. One flag, or no terminal, and the flag-driven path stands
+  # unchanged, which is what keeps scripted installs and CI working.
+  [[ -n "$wizard" || $argc -ne 0 || ! -t 0 ]] || wizard=1
+  [[ "$wizard" != "1" ]] || wizard_setup
 
   # Unnamed identities are named after the account once we've discovered it.
   local name_re='^[A-Za-z0-9_-]+$'
@@ -1019,13 +1332,7 @@ cmd_setup() {
       || die "--sign applies to --kind user -- a foo[bot] account has no settings page to register a signing key on"
   fi
 
-  # openssl only signs App JWTs, so a user-identity-only install never needs it.
-  # doctor's dependency check has to stay in step with this list.
-  local dep deps="gh jq git curl"
-  [[ "$kind" != "app" ]] || deps="$deps openssl"
-  for dep in $deps; do
-    command -v "$dep" >/dev/null || die "missing dependency: $dep"
-  done
+  require_deps "$kind"
 
   [[ -n "$base" ]] || base=$(cfg_get core.basedir) || base="$DEFAULT_BASEDIR"
 
@@ -1048,6 +1355,8 @@ cmd_setup() {
       secret_material=$(tr -d '\r\n' < "$token_file")
       [[ -n "$secret_material" ]] || die "$token_file is empty"
       secret_source="file"
+    elif [[ -n "$wizard_token" ]]; then
+      secret_material="$wizard_token"
     else
       if [[ "$(identity_kind "$probe")" == "user" ]] \
          && cfg_get "identity.$probe.login" >/dev/null; then
@@ -2134,6 +2443,9 @@ usage: guise <command> [flags]
                                     identity already uses
                [--vault <1password vault>] [--op-account <1password account>]
                [--coauthor "Name <email>"] [--base-dir <dir>]
+               [--wizard]   ask for the answers instead of taking flags;
+                            this is what a bare `guise setup` does on a
+                            terminal. [--no-wizard] to insist on flags.
   doctor     verify the whole chain; non-zero exit on any failure
              [--name <identity>]
   uninstall  remove all wiring; leaves keys + clones alone  [-y]
