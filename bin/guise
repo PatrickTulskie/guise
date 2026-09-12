@@ -5,6 +5,7 @@
 # GitHub account holding a PAT.
 #
 # Subcommands: setup | doctor | uninstall | clone | use | token | update
+#              default | rename | basedir | which
 #
 # Self-contained: the helper binaries, git config template, and commit hook
 # are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
@@ -69,7 +70,37 @@ list_identities() {
     | sort -u
 }
 
-basedir() { cfg_get core.basedir || printf '%s' "$DEFAULT_BASEDIR"; }
+# Where an identity's clones live. Per-identity first, so a work identity can
+# sit under ~/work while a personal one sits under ~/src; `core.basedir` is the
+# shared fallback. Always succeeds, and always answers without a trailing
+# separator, so callers can append one.
+basedir() { # [identity]
+  local d=""
+  [[ -z "${1:-}" ]] || d=$(cfg_get "identity.$1.basedir" || true)
+  [[ -n "$d" ]] || d=$(cfg_get core.basedir || true)
+  [[ -n "$d" ]] || d="$DEFAULT_BASEDIR"
+  while [[ "$d" != "/" && "$d" == */ ]]; do d="${d%/}"; done
+  printf '%s' "$d"
+}
+
+# The one directory an identity owns. Basedir "/" is the only case where
+# appending needs care.
+identity_dir() { # name
+  local base; base=$(basedir "$1")
+  case "$base" in
+    /) printf '/%s' "$1" ;;
+    *) printf '%s/%s' "$base" "$1" ;;
+  esac
+}
+
+# Every workspace root in play: the shared one plus any per-identity override.
+# Normalized through basedir(), so the shared root appears once however many
+# identities fall back to it.
+basedirs() {
+  local n
+  { basedir; for n in $(list_identities); do printf '\n%s' "$(basedir "$n")"; done; } \
+    | sort -u
+}
 
 # Which identity commands act on when none is named. Set to the first identity
 # provisioned; change it with `guise default <name>`. "default" is only the
@@ -94,26 +125,25 @@ resolve_default() {
   printf '%s' "$name"
 }
 
-# The identity that owns the current directory, by the same basedir/<identity>/
-# rule the guise-gh helper uses. Standing in an agent directory is a clearer
-# statement of intent than whatever the configured default happens to be.
-identity_from_cwd() {
-  local base rel name
-  base=$(basedir)
-  # setup stores the path as given, so an equivalent basedir can arrive with a
-  # trailing separator that would otherwise never match $PWD.
-  while [[ "$base" != "/" && "$base" == */ ]]; do base="${base%/}"; done
-  if [[ "$base" == "/" ]]; then
-    case "$PWD" in /*) rel="${PWD#/}" ;; *) return 1 ;; esac
-  else
-    case "$PWD/" in "$base"/*) ;; *) return 1 ;; esac
-    rel="${PWD#"$base"/}"
-  fi
-  name="${rel%%/*}"
-  [[ -n "$name" ]] || return 1
-  identity_exists "$name" || return 1
-  printf '%s' "$name"
+# Which identity a path belongs to. Longest match wins: per-identity workspaces
+# are allowed to nest, so ~/src for one identity and ~/src/agents for another
+# both prefix a path under the latter.
+identity_owning() { # absolute path -> identity name
+  local name dir best="" bestlen=0
+  for name in $(list_identities); do
+    dir=$(identity_dir "$name")
+    case "$1/" in
+      "$dir"/*) if [[ ${#dir} -gt $bestlen ]]; then best="$name"; bestlen=${#dir}; fi ;;
+    esac
+  done
+  [[ -n "$best" ]] || return 1
+  printf '%s' "$best"
 }
+
+# Standing in an agent directory is a clearer statement of intent than whatever
+# the configured default happens to be. `guise which` exposes this, and the
+# guise-gh helper asks through it rather than keeping a second copy of the rule.
+identity_from_cwd() { identity_owning "$PWD"; }
 
 key_source() { cfg_get "identity.$1.keysource" || printf 'op'; }
 
@@ -372,28 +402,21 @@ EOF
 write_helper_gh() {
   cat <<'EOF'
 #!/usr/bin/env bash
-# Run `gh` as the agent bot. Identity is inferred from the current directory
-# (basedir/<identity>/...), overridable with GUISE_IDENTITY.
+# Run `gh` as the agent bot. Identity is inferred from the current directory,
+# overridable with GUISE_IDENTITY.
 # gh prefers GH_TOKEN over its stored credentials, so this is sufficient.
 set -euo pipefail
 
-CONFIG="${GUISE_CONFIG:-$HOME/.config/guise/config}"
-IDENTITY="${GUISE_IDENTITY:-}"
+HERE="$(cd "$(dirname "$0")" && pwd)"
 
-if [[ -z "$IDENTITY" && -f "$CONFIG" ]]; then
-  basedir=$(git config -f "$CONFIG" --get core.basedir 2>/dev/null || true)
-  if [[ -n "$basedir" ]]; then
-    case "$PWD/" in
-      "$basedir"/*)
-        rel="${PWD#"$basedir"/}"
-        IDENTITY="${rel%%/*}"
-        ;;
-    esac
-  fi
-fi
+# `guise which` owns the directory-to-identity rule. Asking it keeps one copy
+# of a rule that has to account for per-identity workspace directories; a
+# second copy here is how the two drift apart. Failure means the current
+# directory belongs to no identity, which is not an error: empty is fine, and
+# guise-token resolves the configured default.
+IDENTITY="${GUISE_IDENTITY:-$("$HERE/guise" which 2>/dev/null || true)}"
 
-# Empty is fine: guise-token resolves the configured default.
-GH_TOKEN="$("$(cd "$(dirname "$0")" && pwd)/guise-token" "$IDENTITY")" exec gh "$@"
+GH_TOKEN="$("$HERE/guise-token" "$IDENTITY")" exec gh "$@"
 EOF
 }
 
@@ -711,13 +734,12 @@ render_identity_conf() { # name
 # Regenerate the file we own: one includeIf block per identity. ~/.gitconfig
 # itself only ever holds a single [include] pointing here.
 regen_owned_gitconfig() {
-  local base name
-  base=$(basedir)
+  local name
   {
     echo "# Generated by guise -- do not hand-edit; re-run 'guise setup' instead."
     for name in $(list_identities); do
       echo
-      echo "[includeIf \"gitdir:$(display_path "$base/$name/")\"]"
+      echo "[includeIf \"gitdir:$(display_path "$(identity_dir "$name")/")\"]"
       printf '\tpath = git/%s.conf\n' "$name"
     done
   } > "$OWNED_GITCONFIG"
@@ -1418,8 +1440,8 @@ chk_not_human() {
 with_scoped_repo() { # name cmd... -- runs cmd with $REPO set to a repo inside scope
   local name="$1"; shift
   local dir rc=0
-  [[ -d "$(basedir)/$name" ]] || return 1
-  dir=$(mktemp -d "$(basedir)/$name/.doctor.XXXXXX")
+  [[ -d "$(identity_dir "$name")" ]] || return 1
+  dir=$(mktemp -d "$(identity_dir "$name")/.doctor.XXXXXX")
   git init -q "$dir/repo"
   REPO="$dir/repo" "$@" || rc=$?
   rm -rf "$dir"
@@ -1477,8 +1499,28 @@ chk_shell_hook() {
 }
 chk_binaries() { local b; for b in $HELPERS; do [[ -x "$BIN_DIR/$b" ]] || return 1; done; }
 
+# A repo sitting in a workspace root but outside every identity directory gets
+# none of the wiring, so it commits as the human -- silently, which is the whole
+# problem. Usually the leftovers of a workspace that moved without its clones.
+# Depth 3 covers <root>/<identity>/<repo>/.git, so a stray one at
+# <root>/<repo>/.git is inside the same walk.
+stranded_clones() {
+  local root repo dir
+  basedirs | while read -r root; do
+    [[ -n "$root" && -d "$root" ]] || continue
+    # A submodule's or worktree's .git is a file, and either is still a repo,
+    # so this matches on the name rather than the type.
+    find "$root" -maxdepth 3 -name .git 2>/dev/null | while read -r repo; do
+      dir="${repo%/.git}"
+      identity_owning "$dir" >/dev/null || printf '%s\n' "$dir"
+    done
+  done
+}
+
+chk_no_stranded_clones() { [[ -z "$STRANDED" ]]; }
+
 cmd_doctor() {
-  local only=""
+  local only="" STRANDED=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --name) only="$2"; shift 2 ;;
@@ -1498,6 +1540,11 @@ cmd_doctor() {
         "re-run 'guise setup', or source $(display_path "$SHELL_HOOK") from your shell rc yourself" chk_shell_hook
   check "human identity untouched outside $(basedir)" \
         "something overrode global config -- inspect ~/.gitconfig for stray edits" chk_human_untouched
+  # Walked once, not once per interpolation.
+  STRANDED=$(stranded_clones | tr '\n' ' ')
+  note  "no clones stranded outside an identity directory" \
+        "these commit as YOU: ${STRANDED}-- move them under an identity directory, or point the workspace back with 'guise basedir <path>'" \
+        chk_no_stranded_clones
 
   local names name
   names=$(list_identities)
@@ -1549,7 +1596,7 @@ cmd_doctor() {
       check "installation reaches at least one repository" \
             "the app is installed on no repos -- open its installation settings and pick some under 'Only select repositories'" chk_reaches_repo "$name"
     fi
-    check "includeIf resolves identity inside $(basedir)/$name/" \
+    check "includeIf resolves identity inside $(identity_dir "$name")/" \
           "check the include block in ~/.gitconfig and $OWNED_GITCONFIG" chk_includeif "$name"
     if signing_enabled "$name"; then
       check "signing key present, mode 600" \
@@ -1580,8 +1627,10 @@ cmd_doctor() {
 # ---------------------------------------------------------------------------
 
 cmd_uninstall() {
-  local yes="" b base name signed=""
-  base=$(basedir)
+  local yes="" b roots name signed=""
+  # Read while the config still exists -- and every root, not just the shared
+  # one, or an identity with a workspace of its own goes unmentioned.
+  roots=$(basedirs)
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -y|--yes) yes=1; shift ;;
@@ -1629,7 +1678,9 @@ cmd_uninstall() {
   [[ -d "$KEYS_DIR" ]] && say "  - private keys / tokens / signing keys in $KEYS_DIR"
   [[ -z "$signed" ]] \
     || say "  - the public signing key on the agent account (SSH and GPG keys page)"
-  say "  - $base and any clones in it"
+  printf '%s\n' "$roots" | while read -r b; do
+    [[ -z "$b" ]] || say "  - $b and any clones in it"
+  done
   say "your own git identity was never modified and is unchanged"
 }
 
@@ -1670,7 +1721,7 @@ cmd_clone() {
   esac
 
   local dest
-  dest="$(basedir)/$name/$(basename "$url" .git)"
+  dest="$(identity_dir "$name")/$(basename "$url" .git)"
   [[ -e "$dest" ]] && die "$dest already exists"
   say "cloning into $dest (identity '$name' applies here)"
   git clone "$url" "$dest"
@@ -1709,6 +1760,126 @@ cmd_update() {
   say "re-rendered $count identity conf(s) in $RENDER_DIR"
   say ""
   say "config and stored secrets untouched -- run 'guise doctor' to verify the chain"
+}
+
+# ---------------------------------------------------------------------------
+# which -- the identity owning the current directory
+# ---------------------------------------------------------------------------
+
+# The guise-gh helper's identity resolution, and a straight answer to "who am
+# I about to act as here?". Exits 1 outside every agent directory: callers that
+# want the configured default ask for it themselves.
+cmd_which() {
+  [[ $# -eq 0 ]] || die "which takes no arguments"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  local name
+  name=$(identity_from_cwd) \
+    || die "$PWD belongs to no identity -- agent clones live under $(basedir)/<identity>/"
+  say "$name"
+}
+
+# ---------------------------------------------------------------------------
+# basedir -- move a workspace directory after the fact
+# ---------------------------------------------------------------------------
+
+# Same shape as `update`: config plus this script's own output, so no credential
+# is read and no API called. What makes this more than a config edit is the
+# clones -- a directory left behind under the old path falls out of includeIf
+# scope and starts committing as the human, which is the one failure this tool
+# exists to prevent. So the directories move with the setting, and a
+# destination that is already occupied stops the whole thing.
+cmd_basedir() {
+  local path="" name="" clear=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name)  name="$2"; shift 2 ;;
+      --unset) clear=1; shift ;;
+      -*) die "basedir: unknown flag '$1'" ;;
+      *)
+        [[ -z "$path" ]] || die "basedir: too many arguments"
+        path="$1"; shift ;;
+    esac
+  done
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  if [[ -n "$name" ]]; then
+    identity_exists "$name" \
+      || die "identity '$name' not in config (have: $(list_identities | tr '\n' ' '))"
+  fi
+
+  if [[ -z "$path" && -z "$clear" ]]; then
+    say "$(basedir "$name")"
+    return 0
+  fi
+  [[ -z "$clear" || -z "$path" ]] || die "basedir: --unset takes no path"
+  [[ -z "$clear" || -n "$name" ]] \
+    || die "basedir: --unset needs --name -- the shared workspace always has a value"
+
+  if [[ -n "$path" ]]; then
+    case "$path" in
+      "~") path="$HOME" ;;
+      "~/"*) path="$HOME/${path#\~/}" ;;
+      /*) ;;
+      *) die "basedir: '$path' must be an absolute path (it becomes an includeIf gitdir)" ;;
+    esac
+    while [[ "$path" != "/" && "$path" == */ ]]; do path="${path%/}"; done
+  fi
+
+  # Which identities move, and where to. A per-identity change moves that one;
+  # a change to the shared setting moves everyone still falling back to it.
+  local targets="" n
+  if [[ -n "$name" ]]; then
+    targets="$name"
+  else
+    for n in $(list_identities); do
+      cfg_get "identity.$n.basedir" >/dev/null 2>&1 || targets="$targets $n"
+    done
+  fi
+
+  # Every move resolved and validated before any of them runs: a refusal
+  # halfway through would leave the workspace split across two roots. Tab
+  # separates the pair -- an identity name is [A-Za-z0-9_-]+, so it cannot
+  # carry one, and a path that does still round-trips.
+  local moves="" src dst
+  for n in $targets; do
+    src=$(identity_dir "$n")
+    if [[ -n "$clear" ]]; then dst="$(basedir)/$n"; else dst="$path/$n"; fi
+    [[ "$src" != "$dst" ]] || continue
+    [[ ! -e "$dst" ]] || die "$dst already exists -- move it aside first (nothing changed)"
+    [[ -d "$src" || ! -e "$src" ]] || die "$src is not a directory (nothing changed)"
+    moves="$moves$src	$dst
+"
+  done
+
+  while IFS="	" read -r src dst; do
+    [[ -n "$src" && -d "$src" ]] || continue
+    mkdir -p "$(dirname "$dst")"
+    mv "$src" "$dst" || die "could not move $src to $dst"
+    say "moved $(display_path "$src") -> $(display_path "$dst") (reopen anything you had open in there)"
+  done <<EOF
+$moves
+EOF
+
+  if [[ -n "$clear" ]]; then
+    cfg_unset "identity.$name.basedir"
+  elif [[ -n "$name" ]]; then
+    cfg_set "identity.$name.basedir" "$path"
+  else
+    cfg_set core.basedir "$path"
+  fi
+
+  # Only the includeIf paths name the workspace; the rendered confs do not, so
+  # they are left alone.
+  regen_owned_gitconfig
+  ensure_include_block
+  for n in $(list_identities); do mkdir -p "$(identity_dir "$n")"; done
+  basedirs | while read -r n; do [[ -z "$n" ]] || install_agent_docs "$n"; done
+
+  if [[ -n "$name" ]]; then
+    say "identity '$name' now works out of $(display_path "$(identity_dir "$name")")"
+  else
+    say "shared workspace is now $(display_path "$(basedir)")"
+  fi
+  say "run 'guise doctor' to verify the chain"
 }
 
 # ---------------------------------------------------------------------------
@@ -1775,7 +1946,7 @@ cmd_use() {
   identity_exists "$name" \
     || die "identity '$name' not in config (have: $(list_identities | tr '\n' ' '))"
 
-  dir="$(basedir)/$name"
+  dir=$(identity_dir "$name")
   mkdir -p "$dir"
 
   # The identity follows the directory -- git through includeIf, gh through
@@ -1797,7 +1968,7 @@ cmd_use() {
 # Renames an identity and everything named after it: its config section, its
 # key file, its rendered git conf, and its directory under the base dir.
 cmd_rename() {
-  local old="" new="" base src dst
+  local old="" new="" src dst
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -*) die "rename: unknown flag '$1'" ;;
@@ -1816,7 +1987,10 @@ cmd_rename() {
   identity_exists "$old" || die "identity '$old' not in config"
   identity_exists "$new" && die "identity '$new' already exists"
 
-  base=$(basedir); src="$base/$old"; dst="$base/$new"
+  src=$(identity_dir "$old")
+  # The override travels with the name, so the destination is under whatever
+  # workspace the old name resolved to.
+  dst="$(basedir "$old")/$new"
   [[ ! -e "$dst" ]] || die "$dst already exists -- move it aside first"
 
   git config -f "$CONFIG_FILE" --rename-section "identity.$old" "identity.$new"
@@ -1907,6 +2081,11 @@ usage: guise <command> [flags]
   default    show the identity used when none is named, or set it  [<name>]
   rename     rename an identity, its directory, and its key files
              <old> <new>
+  basedir    show or move the workspace directory, taking the clones with it
+             [<path>] [--name <identity>] [--unset]
+             without <path>: print it; --name: just that identity's, which
+             overrides the shared one; --unset: drop an override
+  which      print the identity owning the current directory
 EOF
 }
 
@@ -1920,6 +2099,8 @@ case "${1:-}" in
   token)     shift; cmd_token "$@" ;;
   default)   shift; cmd_default "$@" ;;
   rename)    shift; cmd_rename "$@" ;;
+  basedir)   shift; cmd_basedir "$@" ;;
+  which)     shift; cmd_which "$@" ;;
   help|--help|-h|"") usage ;;
   *) usage >&2; die "unknown command '${1}'" ;;
 esac

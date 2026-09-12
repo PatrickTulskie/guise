@@ -423,6 +423,130 @@ expect_eq "rename refuses a name already in use" "$?" "1"
 "$ROOT/bin/guise" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
 
+# --- basedir --------------------------------------------------------------------
+echo "workspace directory:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+expect_eq "basedir prints the shared workspace" "$(agent basedir)" "$HOME/agentic-code"
+git init -q "$HOME/agentic-code/$APP_IDENT/someclone"
+
+agent basedir "$HOME/src" >/dev/null 2>&1
+expect_eq "basedir exits 0" "$?" "0"
+expect_eq "the new path is recorded" "$(cfg core.basedir)" "$HOME/src"
+# The point of the whole subcommand: a clone left behind under the old path
+# would fall out of includeIf scope and start committing as the human.
+expect "clones move with the setting" test -d "$HOME/src/$APP_IDENT/someclone"
+expect "the old directory is gone" test ! -e "$HOME/agentic-code/$APP_IDENT"
+expect_eq "identity applies under the new path" \
+  "$(git -C "$HOME/src/$APP_IDENT/someclone" config --get user.email)" \
+  "3333+test-agent[bot]@users.noreply.github.com"
+expect "AGENTS.md lands in the new workspace" test -f "$HOME/src/AGENTS.md"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes after the move" "$?" "0"
+# Re-running with the path it already has moves nothing and breaks nothing.
+agent basedir "$HOME/src" >/dev/null 2>&1
+expect_eq "setting the path it already has is a no-op" "$?" "0"
+expect "clones untouched by the no-op" test -d "$HOME/src/$APP_IDENT/someclone"
+
+# Workspace roots are user-chosen paths, so a space in one must survive the
+# move, the includeIf, and the walk doctor does.
+agent basedir "$HOME/my agents" >/dev/null 2>&1
+expect "a path with a space moves the clones" test -d "$HOME/my agents/$APP_IDENT/someclone"
+expect_eq "and git still resolves the identity there" \
+  "$(git -C "$HOME/my agents/$APP_IDENT/someclone" config --get user.email)" \
+  "3333+test-agent[bot]@users.noreply.github.com"
+agent doctor >/dev/null 2>&1
+expect_eq "and doctor passes" "$?" "0"
+agent basedir "$HOME/src" >/dev/null 2>&1
+
+expect_fail "basedir refuses a relative path" agent basedir relative/path
+mkdir -p "$HOME/occupied/$APP_IDENT"
+expect_fail "basedir refuses an occupied destination" agent basedir "$HOME/occupied"
+expect_eq "and changes nothing when it refuses" "$(cfg core.basedir)" "$HOME/src"
+expect "and leaves the clones where they were" test -d "$HOME/src/$APP_IDENT/someclone"
+
+# --- one workspace per identity -------------------------------------------------
+echo "per-identity workspace:"
+openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
+run_setup --store file --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
+git init -q "$HOME/src/platform/theirclone"
+agent basedir "$HOME/work" --name platform >/dev/null 2>&1
+expect_eq "--name records an override" "$(cfg identity.platform.basedir)" "$HOME/work"
+expect "the named identity moves" test -d "$HOME/work/platform/theirclone"
+expect "and the others stay where they are" test -d "$HOME/src/$APP_IDENT/someclone"
+expect_eq "the shared setting is untouched" "$(cfg core.basedir)" "$HOME/src"
+expect_eq "basedir --name reports the override" "$(agent basedir --name platform)" "$HOME/work"
+expect_eq "and falls back to the shared one for anyone else" \
+  "$(agent basedir --name $APP_IDENT)" "$HOME/src"
+expect_eq "the override wins in git, under the new root" \
+  "$(git -C "$HOME/work/platform/theirclone" config --get user.email)" \
+  "3333+test-agent[bot]@users.noreply.github.com"
+expect_eq "which resolves the identity from the overridden path" \
+  "$(cd "$HOME/work/platform/theirclone" && agent which)" "platform"
+expect_eq "and the other identity from the shared one" \
+  "$(cd "$HOME/src/$APP_IDENT/someclone" && agent which)" "$APP_IDENT"
+expect_fail "which fails outside every identity directory" \
+  env -u GUISE_IDENTITY bash -c "cd \"$HOME\" && \"$ROOT/bin/guise\" which"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes with two workspaces" "$?" "0"
+expect_fail "basedir refuses --unset without --name" agent basedir --unset
+expect_fail "basedir refuses a path and --unset together" agent basedir "$HOME/x" --unset
+expect_fail "basedir refuses an unknown identity" agent basedir "$HOME/x" --name nonesuch
+
+agent basedir --unset --name platform >/dev/null 2>&1
+expect_eq "--unset drops the override" "$(cfg identity.platform.basedir 2>/dev/null)" ""
+expect "and moves the identity back under the shared workspace" \
+  test -d "$HOME/src/platform/theirclone"
+expect "leaving nothing behind" test ! -e "$HOME/work/platform"
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes after --unset" "$?" "0"
+
+# Nested workspaces: the identity whose directory is the longest prefix of the
+# path wins, not whichever one is listed first.
+echo "nested workspaces:"
+agent basedir "$HOME/src/nested" --name platform >/dev/null 2>&1
+mkdir -p "$HOME/src/nested/platform/deep"
+expect_eq "the innermost identity claims the path" \
+  "$(cd "$HOME/src/nested/platform/deep" && agent which)" "platform"
+agent basedir --unset --name platform >/dev/null 2>&1
+
+# --- guise-gh picks the identity up from the directory --------------------------
+# Two accounts with different stored tokens, so the token gh is handed says
+# which identity guise-gh resolved.
+echo "guise-gh identity inference:"
+new_sandbox
+printf 'github_pat_one\n' > "$SB/pat1"
+printf 'github_pat_two\n' > "$SB/pat2"
+FAKE_LOGIN=agent-one FAKE_USER_ID=4001 \
+  run_setup_user --store file --token-file "$SB/pat1" >/dev/null 2>&1
+FAKE_LOGIN=agent-two FAKE_USER_ID=4002 \
+  run_setup_user --store file --token-file "$SB/pat2" >/dev/null 2>&1
+gh_token_in() { (cd "$1" && "$HOME/.local/bin/guise-gh" echo-token); }
+expect_eq "guise-gh uses the identity owning the directory" \
+  "$(gh_token_in "$HOME/agentic-code/agent-two")" "github_pat_two"
+expect_eq "and the default from outside the workspace" \
+  "$(gh_token_in "$HOME")" "github_pat_one"
+agent basedir "$HOME/elsewhere" --name agent-two >/dev/null 2>&1
+expect_eq "and follows an identity to its own workspace" \
+  "$(gh_token_in "$HOME/elsewhere/agent-two")" "github_pat_two"
+expect_eq "GUISE_IDENTITY still overrides the directory" \
+  "$(cd "$HOME/agentic-code/agent-one" && GUISE_IDENTITY=agent-two "$HOME/.local/bin/guise-gh" echo-token)" \
+  "github_pat_two"
+
+# --- doctor notices a clone that fell out of scope ------------------------------
+echo "stranded clones:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+git init -q "$HOME/agentic-code/orphan"
+agent doctor > "$SB/stranded.out" 2>&1
+expect_eq "a repo outside every identity directory does not fail doctor" "$?" "0"
+expect "but doctor warns about it by path" \
+  grep -q "$HOME/agentic-code/orphan" "$SB/stranded.out"
+rm -rf "$HOME/agentic-code/orphan"
+agent doctor > "$SB/stranded.out" 2>&1
+expect "and says nothing once it is gone" \
+  grep -q "^  ok    no clones stranded" "$SB/stranded.out"
+
 # --- clone ---------------------------------------------------------------------
 # Real git, no network: rewrite the github.com URL clone builds to a local bare
 # repo, so what gets asserted is where the clone lands.
@@ -449,6 +573,18 @@ expect "a directory under the base dir that is not an identity falls back" \
 ( cd "$HOME" && agent clone owner/four ) >/dev/null 2>&1
 expect "clone from outside the base directory uses the default" \
   test -d "$HOME/agentic-code/$APP_IDENT/four/.git"
+
+# An identity with a workspace of its own: both the destination and the
+# identity inferred from the current directory come from the override.
+agent basedir "$HOME/own-root" --name platform >/dev/null 2>&1
+git init -q --bare "$SB/origins/owner/six.git"
+( cd "$HOME/own-root/platform" && agent clone owner/six ) >/dev/null 2>&1
+expect "clone follows an identity to its own workspace" \
+  test -d "$HOME/own-root/platform/six/.git"
+expect "and the earlier clones came along" test -d "$HOME/own-root/platform/one/.git"
+agent basedir --unset --name platform >/dev/null 2>&1
+expect "--unset brings them back under the shared workspace" \
+  test -d "$HOME/agentic-code/platform/six/.git"
 
 # setup keeps the path it was given, so both spellings of the same basedir have
 # to resolve the same identity.

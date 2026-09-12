@@ -32,8 +32,9 @@ you — and the credit is yours rather than the tool's, since a commit hook clea
 the `Co-Authored-By` a harness stamps for itself. A co-author naming anyone else
 is real credit and is left alone. Commits the identity only replays — a
 cherry-pick, a revert, a rebase — keep the credit they arrive with.
-Everything is scoped to one directory — by default `~/agentic-code/` — and your
-own git identity is never touched.
+Everything is scoped to one directory — `~/agentic-code/` out of the box, and
+[movable per identity](#where-the-clones-live) — and your own git identity is
+never touched.
 
 That identity can be a **GitHub App bot** (below — the better default) or a
 **[separate GitHub account](#a-separate-github-account-instead-of-an-app)**.
@@ -251,8 +252,8 @@ up through `includeIf`, `guise-gh` by reading `$PWD` — so there's no stale
 variable to follow you back out of the tree. `uninstall` removes the rc lines and
 the hook.
 
-The only convention that matters: **agent clones live under `~/agentic-code/`,
-your own clones live anywhere else.** Inside that directory every git operation
+The only convention that matters: **agent clones live under the workspace
+directory, your own clones live anywhere else.** Inside that directory every git operation
 — from Claude Code, Cursor, or a plain terminal — uses the bot identity with no
 harness-specific configuration. Tell each harness one thing: use `guise-gh`
 instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
@@ -269,6 +270,8 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise token` | print the identity's token (debugging / harness use) |
 | `guise default [name]` | show or change the identity used when none is named |
 | `guise rename <old> <new>` | rename an identity, its directory, and its key files |
+| `guise basedir [path]` | show or move the workspace directory, clones included |
+| `guise which` | print the identity owning the current directory |
 | `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
 
 ## Identity names and the default
@@ -299,6 +302,43 @@ made before this behavior are the reason it exists:
 
 ```bash
 guise rename default patricktulskie-agent
+```
+
+## Where the clones live
+
+Agent clones live under a workspace directory, one subdirectory per identity —
+`~/agentic-code/<identity>/` unless you say otherwise. `setup --base-dir` picks
+it at provisioning time; `guise basedir` changes it afterwards:
+
+```bash
+guise basedir                  # print it
+guise basedir ~/src/agents     # move it
+```
+
+Moving it **takes the clones with it.** That is the whole reason this is a
+subcommand and not a config edit: a clone left behind under the old path falls
+out of `includeIf` scope and quietly starts committing as *you*, which is the
+one failure this tool exists to prevent. If the destination is already
+occupied, nothing moves and nothing changes — clear it yourself and re-run.
+`guise doctor` also warns about any repo it finds in a workspace but outside an
+identity directory, which is what a hand-moved clone looks like.
+
+Each identity can have a workspace of its own, for when a work bot belongs
+under `~/work` and a personal one under `~/src`:
+
+```bash
+guise basedir ~/work --name workbot     # just this identity
+guise basedir --name workbot            # print just this identity's
+guise basedir --unset --name workbot    # back to the shared one (moves it back)
+```
+
+An override wins over the shared setting; identities without one follow it, so
+changing the shared setting moves exactly those. `guise which` answers which
+identity owns wherever you're standing — it's the same rule `guise clone` and
+`guise-gh` use to pick an identity with no `--name`:
+
+```bash
+cd ~/work/workbot/some-repo && guise which   # workbot
 ```
 
 ## Multiple identities

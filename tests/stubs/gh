@@ -3,6 +3,13 @@
 # gh when it is unset -- which is what exercises the tolerant path in setup.
 set -euo pipefail
 
+# Not a gh subcommand: reports the token guise-gh handed it, which is the only
+# way to see from outside which identity guise-gh resolved.
+if [[ "${1:-}" == "echo-token" ]]; then
+  printf '%s\n' "${GH_TOKEN:-}"
+  exit 0
+fi
+
 if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then
   [[ -n "${FAKE_GH_LOGIN:-}" ]] || { echo "gh stub: not logged in" >&2; exit 1; }
   printf '%s\n' "$FAKE_GH_LOGIN"
