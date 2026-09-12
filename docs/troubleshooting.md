@@ -8,7 +8,9 @@ failing check. This page is keyed to the failure modes people actually hit.
 **Cause:** the human's cached credentials (osxkeychain) won the credential
 lookup, or the repo isn't inside the agent directory at all.
 
-- Check the repo location: identity only applies under `~/agentic-code/<identity>/`.
+- Check the repo location: identity only applies under the identity's own
+  directory — `guise basedir --name <identity>` prints the workspace it sits
+  in, and `guise which` inside the repo names the identity that owns it.
   `git config user.email` inside the repo should print the bot address.
 - Check the helper chain: the rendered conf
   (`~/.config/guise/git/<identity>.conf`) must contain an **empty**
@@ -209,9 +211,26 @@ new download).
 `includeIf "gitdir:..."`, not environment variables — deliberately, because
 Cursor's agent subprocesses don't reliably inherit exported env.
 
-Move (or re-clone with `guise clone`) the repo into
-`~/agentic-code/<identity>/`. No harness configuration exists to set; location
-is the mechanism.
+Move (or re-clone with `guise clone`) the repo into the identity's directory
+under `guise basedir`. No harness configuration exists to set; location is the
+mechanism.
+
+## A clone stopped using the identity after the workspace moved
+
+**Cause:** the workspace directory changed but that clone didn't come along, so
+it now sits outside every `includeIf` scope and commits as you.
+
+`guise basedir <path>` moves the identity directories for you, so this is what
+a hand-moved clone — or a `core.basedir` edited directly in
+`~/.config/guise/config` — looks like afterwards. `guise doctor` lists the
+offenders by path under "no clones stranded outside an identity directory".
+
+Either move the clone under the identity's current directory, or point the
+workspace back at where the clones actually are:
+
+```bash
+guise basedir ~/where/they/are      # or --name <identity> for just one
+```
 
 ## `guise use` opens a subshell instead of moving the one you're in
 
@@ -265,7 +284,7 @@ block. If your own commits changed behavior:
 - `git config --show-origin user.email` in one of *your* repos: the origin
   should be your global config, not anything under `~/.config/guise/`.
 - Same for `commit.gpgsign` and `gpg.format`: a `--sign` identity sets both, but
-  only inside `~/agentic-code/<identity>/`.
+  only inside that identity's own directory.
 - `guise doctor` runs a "human identity untouched" check.
 - Worst case `guise uninstall` removes every trace of the wiring.
 
