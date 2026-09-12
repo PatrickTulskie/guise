@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent-id — provision a dedicated GitHub identity for coding harnesses.
+# guise — provision a dedicated GitHub identity for coding harnesses.
 #
 # An identity is either a GitHub App installation (a bot) or a separate
 # GitHub account holding a PAT.
@@ -13,7 +13,7 @@ set -euo pipefail
 
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
-CONFIG_DIR="$HOME/.config/agent-id"
+CONFIG_DIR="$HOME/.config/guise"
 CONFIG_FILE="$CONFIG_DIR/config"
 OWNED_GITCONFIG="$CONFIG_DIR/gitconfig"
 RENDER_DIR="$CONFIG_DIR/git"
@@ -21,17 +21,17 @@ HOOKS_DIR="$RENDER_DIR/agent-hooks"
 KEYS_DIR="$CONFIG_DIR/keys"
 SHELL_HOOK="$CONFIG_DIR/hook.sh"
 BIN_DIR="$HOME/.local/bin"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/guise"
 DEFAULT_BASEDIR="$HOME/agentic-code"
 VAULT="Private"
-MARK_START='# >>> agent-id >>>'
-MARK_END='# <<< agent-id <<<'
-GITHUB_API="${AGENT_ID_GITHUB_API:-https://api.github.com}"
-HELPERS="agent-id-token agent-id-credential agent-gh"
+MARK_START='# >>> guise >>>'
+MARK_END='# <<< guise <<<'
+GITHUB_API="${GUISE_GITHUB_API:-https://api.github.com}"
+HELPERS="guise-token guise-credential guise-gh"
 
 say()  { printf '%s\n' "$*"; }
-warn() { printf 'agent-id: %s\n' "$*" >&2; }
-die()  { printf 'agent-id: error: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'guise: %s\n' "$*" >&2; }
+die()  { printf 'guise: error: %s\n' "$*" >&2; exit 1; }
 
 cfg_get()   { git config -f "$CONFIG_FILE" --get "$1" 2>/dev/null; }
 cfg_set()   { git config -f "$CONFIG_FILE" "$1" "$2"; }
@@ -72,7 +72,7 @@ list_identities() {
 basedir() { cfg_get core.basedir || printf '%s' "$DEFAULT_BASEDIR"; }
 
 # Which identity commands act on when none is named. Set to the first identity
-# provisioned; change it with `agent-id default <name>`. "default" is only the
+# provisioned; change it with `guise default <name>`. "default" is only the
 # fallback for configs written before this was configurable.
 default_identity() { cfg_get core.defaultidentity || printf 'default'; }
 
@@ -95,7 +95,7 @@ resolve_default() {
 }
 
 # The identity that owns the current directory, by the same basedir/<identity>/
-# rule the agent-gh helper uses. Standing in an agent directory is a clearer
+# rule the guise-gh helper uses. Standing in an agent directory is a clearer
 # statement of intent than whatever the configured default happens to be.
 identity_from_cwd() {
   local base rel name
@@ -212,7 +212,7 @@ ask() { # varname "prompt" [default]
   else
     _val="$_def"
   fi
-  [[ -n "$_val" ]] || die "missing required value: $_prompt (pass it as a flag; run 'agent-id help')"
+  [[ -n "$_val" ]] || die "missing required value: $_prompt (pass it as a flag; run 'guise help')"
   eval "$_var=\"\$_val\""
 }
 
@@ -239,15 +239,15 @@ write_helper_token() {
 # Print a GitHub credential for a named identity:
 #   app identities  -- mint (and cache) an installation access token
 #   user identities -- print the stored personal access token
-# Usage: agent-id-token [identity]   (default: $AGENT_ID_IDENTITY or "default")
+# Usage: guise-token [identity]   (default: $GUISE_IDENTITY or "default")
 set -euo pipefail
 
-CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
-IDENTITY="${1:-${AGENT_ID_IDENTITY:-}}"
+CONFIG="${GUISE_CONFIG:-$HOME/.config/guise/config}"
+IDENTITY="${1:-${GUISE_IDENTITY:-}}"
 
-die() { printf 'agent-id-token: %s\n' "$*" >&2; exit 1; }
+die() { printf 'guise-token: %s\n' "$*" >&2; exit 1; }
 
-[[ -f "$CONFIG" ]] || die "no config at $CONFIG -- run 'agent-id setup' first"
+[[ -f "$CONFIG" ]] || die "no config at $CONFIG -- run 'guise setup' first"
 
 # The other helpers pass through whatever they were given (often nothing), so
 # resolving the configured default happens here, once.
@@ -267,11 +267,11 @@ read_secret() { # <1password field> <config key holding the file path>
   local field="$1" path item account
   if [[ "$KEY_SOURCE" == "file" ]]; then
     path=$(cfg "$2") && [[ -f "$path" ]] \
-      || die "secret file missing for identity '$IDENTITY' -- re-run 'agent-id setup'"
+      || die "secret file missing for identity '$IDENTITY' -- re-run 'guise setup'"
     cat "$path"
   else
     item=$(cfg opitem) \
-      || die "no 1Password item in config for '$IDENTITY' -- re-run 'agent-id setup'"
+      || die "no 1Password item in config for '$IDENTITY' -- re-run 'guise setup'"
     account=$(cfg opaccount) || account=""
     if [[ -n "$account" ]]; then op --account "$account" read "$item/$field"
     else op read "$item/$field"; fi
@@ -286,11 +286,11 @@ if [[ "$KIND" == "user" ]]; then
 fi
 
 APP_ID=$(cfg appid) \
-  || die "identity '$IDENTITY' not in config -- run 'agent-id setup --name $IDENTITY'"
+  || die "identity '$IDENTITY' not in config -- run 'guise setup --name $IDENTITY'"
 INSTALL_ID=$(cfg installationid) \
-  || die "identity '$IDENTITY' has no installation id -- re-run 'agent-id setup'"
+  || die "identity '$IDENTITY' has no installation id -- re-run 'guise setup'"
 
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/agent-id"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/guise"
 mkdir -p "$CACHE_DIR"; chmod 700 "$CACHE_DIR"
 TOKEN_FILE="$CACHE_DIR/$IDENTITY.token.json"
 
@@ -326,7 +326,7 @@ mint_token() {
     -H "Authorization: Bearer ${jwt}" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${AGENT_ID_GITHUB_API:-https://api.github.com}/app/installations/${INSTALL_ID}/access_tokens" \
+    "${GUISE_GITHUB_API:-https://api.github.com}/app/installations/${INSTALL_ID}/access_tokens" \
     || die "failed to mint installation token -- key unreadable (1Password locked / file gone), stale ids, or app uninstalled"
 }
 
@@ -347,7 +347,7 @@ write_helper_credential() {
   cat <<'EOF'
 #!/usr/bin/env bash
 # Git credential helper. Invoked from agent-scoped git config as:
-#   agent-id-credential <identity> <get|store|erase>
+#   guise-credential <identity> <get|store|erase>
 # Must drain stdin in all cases or git may block on the write side.
 set -euo pipefail
 
@@ -358,7 +358,7 @@ case "${1:-}" in
   get)
     cat >/dev/null
     echo "username=x-access-token"
-    echo "password=$("$(cd "$(dirname "$0")" && pwd)/agent-id-token" "$IDENTITY")"
+    echo "password=$("$(cd "$(dirname "$0")" && pwd)/guise-token" "$IDENTITY")"
     ;;
   *)
     # store/erase: tokens are ephemeral, nothing to persist. Exit clean.
@@ -373,12 +373,12 @@ write_helper_gh() {
   cat <<'EOF'
 #!/usr/bin/env bash
 # Run `gh` as the agent bot. Identity is inferred from the current directory
-# (basedir/<identity>/...), overridable with AGENT_ID_IDENTITY.
+# (basedir/<identity>/...), overridable with GUISE_IDENTITY.
 # gh prefers GH_TOKEN over its stored credentials, so this is sufficient.
 set -euo pipefail
 
-CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
-IDENTITY="${AGENT_ID_IDENTITY:-}"
+CONFIG="${GUISE_CONFIG:-$HOME/.config/guise/config}"
+IDENTITY="${GUISE_IDENTITY:-}"
 
 if [[ -z "$IDENTITY" && -f "$CONFIG" ]]; then
   basedir=$(git config -f "$CONFIG" --get core.basedir 2>/dev/null || true)
@@ -392,8 +392,8 @@ if [[ -z "$IDENTITY" && -f "$CONFIG" ]]; then
   fi
 fi
 
-# Empty is fine: agent-id-token resolves the configured default.
-GH_TOKEN="$("$(cd "$(dirname "$0")" && pwd)/agent-id-token" "$IDENTITY")" exec gh "$@"
+# Empty is fine: guise-token resolves the configured default.
+GH_TOKEN="$("$(cd "$(dirname "$0")" && pwd)/guise-token" "$IDENTITY")" exec gh "$@"
 EOF
 }
 
@@ -404,17 +404,17 @@ EOF
 # whole tool down with it.
 write_shell_hook() {
   cat <<'EOF'
-# agent-id shell integration -- written by `agent-id setup`, do not edit.
-# Rewritten by `agent-id update`; edits here are lost.
+# guise shell integration -- written by `guise setup`, do not edit.
+# Rewritten by `guise update`; edits here are lost.
 
-agent-id() {
+guise() {
   if [ "${1:-}" = use ]; then
     shift
-    local __agent_id_cd
-    __agent_id_cd=$(command agent-id use --emit-shell "$@") || return $?
-    eval "$__agent_id_cd"
+    local __guise_cd
+    __guise_cd=$(command guise use --emit-shell "$@") || return $?
+    eval "$__guise_cd"
   else
-    command agent-id "$@"
+    command guise "$@"
   fi
 }
 EOF
@@ -462,8 +462,8 @@ if [[ -n "${GIT_AUTHOR_EMAIL:-}" && -n "$SELF_EMAIL" \
   exit 0
 fi
 
-CONFIG="${AGENT_ID_CONFIG:-$HOME/.config/agent-id/config}"
-CO_AUTHOR="${AGENT_ID_CO_AUTHOR:-}"
+CONFIG="${GUISE_CONFIG:-$HOME/.config/guise/config}"
+CO_AUTHOR="${GUISE_CO_AUTHOR:-}"
 if [[ -z "$CO_AUTHOR" && -f "$CONFIG" ]]; then
   CO_AUTHOR=$(git config -f "$CONFIG" --get core.coauthor 2>/dev/null || true)
 fi
@@ -493,7 +493,7 @@ fi
 HUMAN_ADDR="${CO_AUTHOR##*<}"
 DROP_ADDRS="noreply@anthropic.com cursoragent@cursor.com ${SELF_EMAIL} ${HUMAN_ADDR%>}"
 
-STRIPPED="$MSG_FILE.agent-id"
+STRIPPED="$MSG_FILE.guise"
 awk -v drop="$DROP_ADDRS" '
   BEGIN {
     n = split(drop, a, " ")
@@ -522,7 +522,7 @@ EOF
 
 agent_conf_template() {
   cat <<'EOF'
-# Generated by agent-id -- do not hand-edit; re-run `agent-id setup` instead.
+# Generated by guise -- do not hand-edit; re-run `guise setup` instead.
 
 [user]
 	name = {{GIT_NAME}}
@@ -534,7 +534,7 @@ agent_conf_template() {
 	# Empty value CLEARS inherited helpers (osxkeychain), otherwise the
 	# human's cached credentials win and commits push as the human.
 	helper =
-	helper = {{BIN_DIR}}/agent-id-credential {{NAME}}
+	helper = {{BIN_DIR}}/guise-credential {{NAME}}
 
 [core]
 	hooksPath = {{HOOKS_DIR}}
@@ -582,13 +582,13 @@ EOF
 
 install_binaries() {
   mkdir -p "$BIN_DIR"
-  write_helper_token      > "$BIN_DIR/agent-id-token"
-  write_helper_credential > "$BIN_DIR/agent-id-credential"
-  write_helper_gh         > "$BIN_DIR/agent-gh"
-  chmod 755 "$BIN_DIR/agent-id-token" "$BIN_DIR/agent-id-credential" "$BIN_DIR/agent-gh"
-  if [[ "$SCRIPT_PATH" != "$BIN_DIR/agent-id" ]]; then
-    cp "$SCRIPT_PATH" "$BIN_DIR/agent-id"
-    chmod 755 "$BIN_DIR/agent-id"
+  write_helper_token      > "$BIN_DIR/guise-token"
+  write_helper_credential > "$BIN_DIR/guise-credential"
+  write_helper_gh         > "$BIN_DIR/guise-gh"
+  chmod 755 "$BIN_DIR/guise-token" "$BIN_DIR/guise-credential" "$BIN_DIR/guise-gh"
+  if [[ "$SCRIPT_PATH" != "$BIN_DIR/guise" ]]; then
+    cp "$SCRIPT_PATH" "$BIN_DIR/guise"
+    chmod 755 "$BIN_DIR/guise"
   fi
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
@@ -627,7 +627,7 @@ install_shell_hook() {
   write_shell_hook > "$SHELL_HOOK"
   chmod 644 "$SHELL_HOOK"
   if ! rc=$(shell_rc); then
-    warn "unrecognized shell '${SHELL:-none}' -- source $(display_path "$SHELL_HOOK") from your shell rc to get 'agent-id use'"
+    warn "unrecognized shell '${SHELL:-none}' -- source $(display_path "$SHELL_HOOK") from your shell rc to get 'guise use'"
     return 0
   fi
   # ensure_marked_block is a no-op when the line is already there and current,
@@ -654,12 +654,12 @@ install_agent_docs() { # basedir
 # Agent workspace
 
 Repos under this directory use a dedicated GitHub identity (a GitHub App bot
-or a separate account), wired up by `agent-id`. Commits here are authored by
+or a separate account), wired up by `guise`. Commits here are authored by
 that identity automatically.
 
-- Use `agent-gh` instead of `gh` for every GitHub CLI operation (PRs, issues,
+- Use `guise-gh` instead of `gh` for every GitHub CLI operation (PRs, issues,
   API calls). Plain `gh` acts as the human's account.
-- Clone with `agent-id clone <owner/repo>` or an https URL; never ssh remotes
+- Clone with `guise clone <owner/repo>` or an https URL; never ssh remotes
   (ssh authenticates as the human).
 - Do not change git identity settings (user.name, user.email, credential
   helpers, signing) -- the directory-scoped config handles all of that.
@@ -686,7 +686,7 @@ render_identity_conf() { # name
   if signing_enabled "$name"; then
     key=$(signing_key "$name")
     [[ -f "$key" && -f "$key.pub" ]] \
-      || die "identity '$name' signs commits but its key is gone from $key -- re-run 'agent-id setup --sign'"
+      || die "identity '$name' signs commits but its key is gone from $key -- re-run 'guise setup --sign'"
     signing=$(signing_on_block "$(allowed_signers "$name")")
     signingkey=$(printf '\n\tsigningkey = %s' "$key")
     # namespaces="git" stops this key vouching for anything but commits and
@@ -714,7 +714,7 @@ regen_owned_gitconfig() {
   local base name
   base=$(basedir)
   {
-    echo "# Generated by agent-id -- do not hand-edit; re-run 'agent-id setup' instead."
+    echo "# Generated by guise -- do not hand-edit; re-run 'guise setup' instead."
     for name in $(list_identities); do
       echo
       echo "[includeIf \"gitdir:$(display_path "$base/$name/")\"]"
@@ -741,7 +741,7 @@ replace_contents() { # file source
 }
 
 # -x, because validation below compares whole lines: without it a line that
-# merely quotes the marker text -- `echo "# >>> agent-id >>>"` -- looks like
+# merely quotes the marker text -- `echo "# >>> guise >>>"` -- looks like
 # wiring here and like a stray marker there, and setup refuses a good rc.
 has_markers() { # file
   grep -qxF "$MARK_START" "$1" || grep -qxF "$MARK_END" "$1"
@@ -763,7 +763,7 @@ valid_markers() { # file
 check_markers() { # file
   has_markers "$1" || return 0
   valid_markers "$1" \
-    || die "$(display_path "$1") has a stray agent-id marker -- the block is not one clean pair, so it cannot be edited safely. Fix the markers by hand, then re-run."
+    || die "$(display_path "$1") has a stray guise marker -- the block is not one clean pair, so it cannot be edited safely. Fix the markers by hand, then re-run."
 }
 
 # Drop the block plus the single blank line setup inserted above it. The file's
@@ -1139,7 +1139,7 @@ cmd_setup() {
     git_signs_ssh || die "git $(git --version | awk '{print $3}') is too old for SSH signing -- 2.34 or newer"
     sign_key="$KEYS_DIR/$name.signing"
     say "==> provisioning an SSH signing key for @$login"
-    generate_signing_key "$sign_key" "agent-id $name"
+    generate_signing_key "$sign_key" "guise $name"
     announce_signing_key "$login" "$sign_key.pub"
   elif signing_enabled "$name"; then
     # Shredding now would leave a rendered conf that still signs, naming a key
@@ -1264,10 +1264,10 @@ cmd_setup() {
 
   say "==> setup complete for identity '$name'"
   [[ -z "$want_sign" ]] || say "    commits are SSH-signed with $sign_key"
-  say "    agent clones go in $base/$name/ (use 'agent-id clone <owner/repo>')"
+  say "    agent clones go in $base/$name/ (use 'guise clone <owner/repo>')"
   say "    default identity: $(default_identity)"
   if rc_path=$(shell_rc); then
-    say "    'agent-id use' cds this shell once $(display_path "$rc_path") is reloaded"
+    say "    'guise use' cds this shell once $(display_path "$rc_path") is reloaded"
     say "    -- open a new shell, or: . $(display_path "$rc_path")"
   fi
   say ""
@@ -1342,11 +1342,11 @@ chk_tokenfile() {
 chk_token() {
   local t re='^ghs_'
   [[ "$(identity_kind "$1")" != "user" ]] || re='^(github_pat_|ghp_)'
-  t=$("$BIN_DIR/agent-id-token" "$1"); [[ "$t" =~ $re ]]
+  t=$("$BIN_DIR/guise-token" "$1"); [[ "$t" =~ $re ]]
 }
 chk_cache() {
   local a b
-  a=$("$BIN_DIR/agent-id-token" "$1"); b=$("$BIN_DIR/agent-id-token" "$1")
+  a=$("$BIN_DIR/guise-token" "$1"); b=$("$BIN_DIR/guise-token" "$1")
   [[ "$a" == "$b" && -f "$CACHE_DIR/$1.token.json" ]]
 }
 chk_email_format() {
@@ -1362,11 +1362,11 @@ chk_bot_real() {
 chk_ids_differ() { [[ "$(cfg_get "identity.$1.appid")" != "$(cfg_get "identity.$1.botuserid")" ]]; }
 
 # One authenticated call as the identity itself. Works for both kinds:
-# agent-id-token mints an installation token for apps and returns the PAT for
+# guise-token mints an installation token for apps and returns the PAT for
 # accounts. The credential goes through a config file on a pipe, never argv.
 api_as_identity() { # name path -> JSON on stdout
   local t
-  t=$("$BIN_DIR/agent-id-token" "$1") || return 1
+  t=$("$BIN_DIR/guise-token" "$1") || return 1
   curl -sf --config <(printf 'header = "Authorization: Bearer %s"\n' "$t") \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -1447,7 +1447,7 @@ chk_signing_registered() {
 # End to end rather than by inspection: make a real commit inside agent scope
 # and verify it against the rendered allowed-signers file.
 _chk_signs() {
-  git -C "$REPO" commit -q --allow-empty -m "agent-id doctor" || return 1
+  git -C "$REPO" commit -q --allow-empty -m "guise doctor" || return 1
   git -C "$REPO" verify-commit HEAD
 }
 chk_signs() { with_scoped_repo "$1" _chk_signs; }
@@ -1485,23 +1485,23 @@ cmd_doctor() {
       *) die "doctor: unknown flag '$1'" ;;
     esac
   done
-  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
 
   say "doctor:"
   check "dependencies present (gh jq openssl git curl)" \
         "brew install the missing one" chk_deps
   check "helper binaries installed in $BIN_DIR" \
-        "re-run 'agent-id setup'" chk_binaries
+        "re-run 'guise setup'" chk_binaries
   check "co-author hook installed and executable" \
-        "re-run 'agent-id setup'" chk_hook
-  note  "shell hook sourced (lets 'agent-id use' cd this shell)" \
-        "re-run 'agent-id setup', or source $(display_path "$SHELL_HOOK") from your shell rc yourself" chk_shell_hook
+        "re-run 'guise setup'" chk_hook
+  note  "shell hook sourced (lets 'guise use' cd this shell)" \
+        "re-run 'guise setup', or source $(display_path "$SHELL_HOOK") from your shell rc yourself" chk_shell_hook
   check "human identity untouched outside $(basedir)" \
         "something overrode global config -- inspect ~/.gitconfig for stray edits" chk_human_untouched
 
   local names name
   names=$(list_identities)
-  [[ -n "$names" ]] || die "no identities in config -- run 'agent-id setup'"
+  [[ -n "$names" ]] || die "no identities in config -- run 'guise setup'"
   if [[ -n "$only" ]]; then names="$only"; fi
 
   for name in $names; do
@@ -1520,7 +1520,7 @@ cmd_doctor() {
       check "token valid and still @$(cfg_get "identity.$name.login")" \
             "token revoked, expired, or replaced with one for another account -- re-run setup" chk_user_real "$name"
       check "token not expiring within 30 days" \
-            "issue a new PAT and re-run 'agent-id setup --kind user --name $name --token-file <path>'" chk_token_fresh "$name"
+            "issue a new PAT and re-run 'guise setup --kind user --name $name --token-file <path>'" chk_token_fresh "$name"
       check "agent account is not your own account" \
             "this identity holds a token for YOUR account -- issue one from the agent account" chk_not_human "$name"
       check "token reaches at least one repository" \
@@ -1553,12 +1553,12 @@ cmd_doctor() {
           "check the include block in ~/.gitconfig and $OWNED_GITCONFIG" chk_includeif "$name"
     if signing_enabled "$name"; then
       check "signing key present, mode 600" \
-            "regenerate it with 'agent-id setup --sign --name $name'" chk_signing_key "$name"
+            "regenerate it with 'guise setup --sign --name $name'" chk_signing_key "$name"
       check "signing key registered on @$(cfg_get "identity.$name.login")" \
             "as the agent account, add $(signing_key "$name").pub at github.com/settings/ssh/new with Key type: Signing Key" \
             chk_signing_registered "$name"
       check "commits sign and verify in agent scope" \
-            "rendered conf should set gpg.format=ssh and user.signingkey -- re-run 'agent-id setup --sign'" chk_signs "$name"
+            "rendered conf should set gpg.format=ssh and user.signingkey -- re-run 'guise setup --sign'" chk_signs "$name"
     else
       check "commit signing off in agent scope" \
             "rendered conf should set commit.gpgsign=false -- re-run setup" chk_gpgsign "$name"
@@ -1589,7 +1589,7 @@ cmd_uninstall() {
     esac
   done
   if [[ -z "$yes" && -t 0 ]]; then
-    read -r -p "Remove agent-id wiring (gitconfig include, binaries, config, token cache)? [y/N] " reply
+    read -r -p "Remove guise wiring (gitconfig include, binaries, config, token cache)? [y/N] " reply
     case "$reply" in y|Y|yes) ;; *) say "aborted"; exit 0 ;; esac
   fi
 
@@ -1600,11 +1600,11 @@ cmd_uninstall() {
   done
 
   remove_include_block
-  say "removed agent-id block from ~/.gitconfig"
+  say "removed guise block from ~/.gitconfig"
   remove_shell_hook
-  say "removed agent-id block from your shell rc"
+  say "removed guise block from your shell rc"
 
-  for b in $HELPERS agent-id; do
+  for b in $HELPERS guise; do
     rm -f "$BIN_DIR/$b"
   done
   say "removed binaries from $BIN_DIR"
@@ -1646,15 +1646,15 @@ cmd_clone() {
       *) repo="$1"; shift ;;
     esac
   done
-  [[ -n "$repo" ]] || die "usage: agent-id clone <owner/repo | https url> [--name identity]"
-  [[ -f "$CONFIG_FILE" ]] || die "run 'agent-id setup' first"
+  [[ -n "$repo" ]] || die "usage: guise clone <owner/repo | https url> [--name identity]"
+  [[ -f "$CONFIG_FILE" ]] || die "run 'guise setup' first"
 
   if [[ -z "$name" ]]; then
     name=$(identity_from_cwd) || name=""
   fi
   if [[ -z "$name" ]]; then
     name=$(resolve_default) \
-      || die "no default identity set -- pass --name, or set one with 'agent-id default <name>'"
+      || die "no default identity set -- pass --name, or set one with 'guise default <name>'"
   fi
   identity_exists "$name" || die "identity '$name' not in config"
 
@@ -1674,7 +1674,7 @@ cmd_clone() {
   [[ -e "$dest" ]] && die "$dest already exists"
   say "cloning into $dest (identity '$name' applies here)"
   git clone "$url" "$dest"
-  say "done -- work in $dest; use 'agent-gh' instead of 'gh' for PRs"
+  say "done -- work in $dest; use 'guise-gh' instead of 'gh' for PRs"
 }
 
 # ---------------------------------------------------------------------------
@@ -1688,10 +1688,10 @@ cmd_clone() {
 # credential or fresh GitHub metadata.
 cmd_update() {
   [[ $# -eq 0 ]] || die "update takes no arguments"
-  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
   local names name count=0
   names=$(list_identities)
-  [[ -n "$names" ]] || die "no identities in config -- run 'agent-id setup'"
+  [[ -n "$names" ]] || die "no identities in config -- run 'guise setup'"
 
   install_binaries
   install_hook
@@ -1708,7 +1708,7 @@ cmd_update() {
   ensure_include_block
   say "re-rendered $count identity conf(s) in $RENDER_DIR"
   say ""
-  say "config and stored secrets untouched -- run 'agent-id doctor' to verify the chain"
+  say "config and stored secrets untouched -- run 'guise doctor' to verify the chain"
 }
 
 # ---------------------------------------------------------------------------
@@ -1716,9 +1716,9 @@ cmd_update() {
 # ---------------------------------------------------------------------------
 
 cmd_token() {
-  [[ -x "$BIN_DIR/agent-id-token" ]] || die "helpers not installed -- run 'agent-id setup' first"
+  [[ -x "$BIN_DIR/guise-token" ]] || die "helpers not installed -- run 'guise setup' first"
   # Empty is fine: the helper resolves the configured default.
-  exec "$BIN_DIR/agent-id-token" "${1:-}"
+  exec "$BIN_DIR/guise-token" "${1:-}"
 }
 
 # ---------------------------------------------------------------------------
@@ -1726,7 +1726,7 @@ cmd_token() {
 # ---------------------------------------------------------------------------
 
 cmd_default() {
-  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
   if [[ $# -eq 0 ]]; then
     say "$(default_identity)"
     return 0
@@ -1766,11 +1766,11 @@ cmd_use() {
         name="$1"; shift ;;
     esac
   done
-  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
 
   if [[ -z "$name" ]]; then
     name=$(resolve_default) \
-      || die "no default identity set -- name one, or set one with 'agent-id default <name>'"
+      || die "no default identity set -- name one, or set one with 'guise default <name>'"
   fi
   identity_exists "$name" \
     || die "identity '$name' not in config (have: $(list_identities | tr '\n' ' '))"
@@ -1779,7 +1779,7 @@ cmd_use() {
   mkdir -p "$dir"
 
   # The identity follows the directory -- git through includeIf, gh through
-  # agent-gh reading $PWD -- so landing there is the whole job. Nothing is
+  # guise-gh reading $PWD -- so landing there is the whole job. Nothing is
   # exported, which is what keeps a later cd out of the tree from carrying a
   # stale identity with it.
   if [[ -n "$emit" ]]; then
@@ -1808,8 +1808,8 @@ cmd_rename() {
         shift ;;
     esac
   done
-  [[ -n "$old" && -n "$new" ]] || die "usage: agent-id rename <old> <new>"
-  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'agent-id setup' first"
+  [[ -n "$old" && -n "$new" ]] || die "usage: guise rename <old> <new>"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
 
   local name_re='^[A-Za-z0-9_-]+$'
   [[ "$new" =~ $name_re ]] || die "identity name must match [A-Za-z0-9_-]+: '$new'"
@@ -1865,9 +1865,9 @@ cmd_rename() {
 
 usage() {
   cat <<EOF
-agent-id -- a dedicated GitHub identity for coding harnesses
+guise -- a dedicated GitHub identity for coding harnesses
 
-usage: agent-id <command> [flags]
+usage: guise <command> [flags]
 
   setup      provision an identity (idempotent; safe to re-run)
              GitHub App bot (default):

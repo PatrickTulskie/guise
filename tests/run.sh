@@ -30,7 +30,7 @@ new_sandbox() {
   export FAKE_USER_ID=4444 FAKE_LOGIN=patrick-agent
   unset FAKE_GH_LOGIN FAKE_TOKEN_EXPIRES 2>/dev/null || true
   export OP_FAKE_ACCOUNT=my.1password.com
-  unset AGENT_ID_IDENTITY AGENT_ID_CONFIG AGENT_ID_CO_AUTHOR 2>/dev/null || true
+  unset GUISE_IDENTITY GUISE_CONFIG GUISE_CO_AUTHOR 2>/dev/null || true
   # Pins which rc setup writes the shell-hook line into, so the suite asserts
   # the same path on macOS and on Linux. zsh need not be installed for this.
   export SHELL=/bin/zsh
@@ -43,20 +43,20 @@ new_sandbox() {
 
 # No --coauthor: the hook's fallback to global user.name/email is under test.
 run_setup() {
-  "$ROOT/bin/agent-id" setup --owner patricktulskie --app-id 1111 \
+  "$ROOT/bin/guise" setup --owner patricktulskie --app-id 1111 \
     --op-account my.1password.com "$@" </dev/null
 }
 
 run_setup_user() {
-  "$ROOT/bin/agent-id" setup --kind user \
+  "$ROOT/bin/guise" setup --kind user \
     --op-account my.1password.com "$@" </dev/null
 }
 
-agent() { "$ROOT/bin/agent-id" "$@" </dev/null; }
+agent() { "$ROOT/bin/guise" "$@" </dev/null; }
 
 new_token_file() { printf 'github_pat_stub123\n' > "$1"; }
 
-cfg() { git config -f "$HOME/.config/agent-id/config" --get "$1"; }
+cfg() { git config -f "$HOME/.config/guise/config" --get "$1"; }
 
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 
@@ -68,14 +68,14 @@ USER_IDENT=patrick-agent
 snapshot() {
   cat "$HOME/.gitconfig" \
       "$HOME/.zshrc" \
-      "$HOME/.config/agent-id/hook.sh" \
-      "$HOME/.config/agent-id/config" \
-      "$HOME/.config/agent-id/gitconfig" \
-      "$HOME/.config/agent-id/git/$APP_IDENT.conf" \
-      "$HOME/.config/agent-id/git/agent-hooks/prepare-commit-msg" \
-      "$HOME/.local/bin/agent-id-token" \
-      "$HOME/.local/bin/agent-id-credential" \
-      "$HOME/.local/bin/agent-gh" 2>/dev/null | shasum | cut -d' ' -f1
+      "$HOME/.config/guise/hook.sh" \
+      "$HOME/.config/guise/config" \
+      "$HOME/.config/guise/gitconfig" \
+      "$HOME/.config/guise/git/$APP_IDENT.conf" \
+      "$HOME/.config/guise/git/agent-hooks/prepare-commit-msg" \
+      "$HOME/.local/bin/guise-token" \
+      "$HOME/.local/bin/guise-credential" \
+      "$HOME/.local/bin/guise-gh" 2>/dev/null | shasum | cut -d' ' -f1
 }
 
 # --- setup provisions everything --------------------------------------------
@@ -83,25 +83,25 @@ echo "setup:"
 new_sandbox
 run_setup --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "setup exits 0" "$?" "0"
-expect "config file written" test -f "$HOME/.config/agent-id/config"
+expect "config file written" test -f "$HOME/.config/guise/config"
 expect_eq "slug discovered from API" "$(cfg identity.$APP_IDENT.slug)" "test-agent"
 expect_eq "installation id discovered" "$(cfg identity.$APP_IDENT.installationid)" "2222"
 expect_eq "bot user id discovered (not app id)" "$(cfg identity.$APP_IDENT.botuserid)" "3333"
 expect_eq "basedir defaults to ~/agentic-code" "$(cfg core.basedir)" "$HOME/agentic-code"
 expect "PEM shredded after storing" test ! -e "$SB/key.pem"
 expect "private key landed in 1Password" test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
-expect "helpers installed" test -x "$HOME/.local/bin/agent-id-token"
-expect "credential helper installed" test -x "$HOME/.local/bin/agent-id-credential"
-expect "agent-gh installed" test -x "$HOME/.local/bin/agent-gh"
-expect "hook installed" test -x "$HOME/.config/agent-id/git/agent-hooks/prepare-commit-msg"
+expect "helpers installed" test -x "$HOME/.local/bin/guise-token"
+expect "credential helper installed" test -x "$HOME/.local/bin/guise-credential"
+expect "guise-gh installed" test -x "$HOME/.local/bin/guise-gh"
+expect "hook installed" test -x "$HOME/.config/guise/git/agent-hooks/prepare-commit-msg"
 expect "identity dir created" test -d "$HOME/agentic-code/$APP_IDENT"
 expect "AGENTS.md dropped in workspace" test -f "$HOME/agentic-code/AGENTS.md"
 expect "CLAUDE.md imports AGENTS.md" grep -q '@AGENTS.md' "$HOME/agentic-code/CLAUDE.md"
 expect_eq "exactly one marker block in ~/.gitconfig" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
-expect "shell hook written" test -f "$HOME/.config/agent-id/hook.sh"
+  "$(grep -cF '# >>> guise >>>' "$HOME/.gitconfig")" "1"
+expect "shell hook written" test -f "$HOME/.config/guise/hook.sh"
 expect_eq "exactly one marker block in ~/.zshrc" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/.zshrc")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/.zshrc")" "1"
 
 # --- idempotency -------------------------------------------------------------
 echo "idempotency:"
@@ -111,9 +111,9 @@ run_setup >/dev/null 2>&1
 expect_eq "re-run without --pem exits 0" "$?" "0"
 expect_eq "re-run changes no artifact" "$(snapshot)" "$snap1"
 expect_eq "still exactly one marker block" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/.gitconfig")" "1"
 expect_eq "and the rc line is not stacked up either" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/.zshrc")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/.zshrc")" "1"
 expect_eq "edited AGENTS.md not overwritten" \
   "$(cat "$HOME/agentic-code/AGENTS.md")" "custom rules"
 
@@ -123,9 +123,9 @@ openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
 run_setup --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
 expect_eq "second identity setup exits 0" "$?" "0"
 expect_eq "two includeIf blocks in owned gitconfig" \
-  "$(grep -c includeIf "$HOME/.config/agent-id/gitconfig")" "2"
+  "$(grep -c includeIf "$HOME/.config/guise/gitconfig")" "2"
 expect_eq "~/.gitconfig untouched by second identity" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/.gitconfig")" "1"
 expect "platform dir created" test -d "$HOME/agentic-code/platform"
 run_setup --name reused >/dev/null 2>&1
 expect_eq "new identity without --pem reuses the stored key" "$?" "0"
@@ -197,7 +197,7 @@ expect_eq "the contributor and the human are the only co-authors left" \
 # unset key and the hook runs under set -e. Driven directly rather than through a
 # commit, so unsetting the global identity can't reorder ~/.gitconfig and leave
 # [user] winning over the include.
-hook="$HOME/.config/agent-id/git/agent-hooks/prepare-commit-msg"
+hook="$HOME/.config/guise/git/agent-hooks/prepare-commit-msg"
 mkdir -p "$SB/nohome"
 printf 'a commit subject\n' > "$SB/msg.txt"
 ( HOME="$SB/nohome" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
@@ -205,13 +205,13 @@ expect_eq "hook exits 0 when there is no identity to credit" "$?" "0"
 expect_eq "and leaves the message without a trailer" \
   "$(grep -c '^Co-authored-by:' "$SB/msg.txt")" "0"
 printf 'a commit subject\n' > "$SB/msg.txt"
-( AGENT_ID_CO_AUTHOR="Someone <s@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+( GUISE_CO_AUTHOR="Someone <s@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
 expect_eq "and still adds the trailer when one is available" \
   "$(grep -c '^Co-authored-by: Someone <s@example.com>$' "$SB/msg.txt")" "1"
 
 # Clearing the co-author token is not licence to touch the rest of the block.
 printf 'a commit subject\n\nSigned-off-by: Someone <s@example.com>\nCo-Authored-By: Claude <noreply@anthropic.com>\n' > "$SB/msg.txt"
-( AGENT_ID_CO_AUTHOR="Human <human@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+( GUISE_CO_AUTHOR="Human <human@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
 expect_eq "an unrelated trailer survives the strip" \
   "$(grep -c '^Signed-off-by: Someone <s@example.com>$' "$SB/msg.txt")" "1"
 expect_eq "and the harness co-author is gone, whatever its casing" \
@@ -220,30 +220,30 @@ expect_eq "and the harness co-author is gone, whatever its casing" \
 # addIfDifferent compares the trailer verbatim, so a message that already
 # credits the human in another spelling would otherwise get a second one.
 printf 'a commit subject\n\nCo-Authored-By: HUMAN <Human@Example.com>\n' > "$SB/msg.txt"
-( AGENT_ID_CO_AUTHOR="Human <human@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
+( GUISE_CO_AUTHOR="Human <human@example.com>" "$hook" "$SB/msg.txt" ) >/dev/null 2>&1
 expect_eq "the human's own trailer is not duplicated by a different spelling" \
   "$(grep -i -c '^Co-authored-by:' "$SB/msg.txt")" "1"
 
 # --- token cache -------------------------------------------------------------
 echo "token cache:"
-rm -rf "$XDG_CACHE_HOME/agent-id"; : > "$CURL_LOG"
-t1=$("$HOME/.local/bin/agent-id-token" "$APP_IDENT")
-t2=$("$HOME/.local/bin/agent-id-token" "$APP_IDENT")
+rm -rf "$XDG_CACHE_HOME/guise"; : > "$CURL_LOG"
+t1=$("$HOME/.local/bin/guise-token" "$APP_IDENT")
+t2=$("$HOME/.local/bin/guise-token" "$APP_IDENT")
 expect_eq "second call returns cached token" "$t1" "$t2"
 expect_eq "only one mint against the API" "$(grep -c access_tokens "$CURL_LOG")" "1"
 
 # --- doctor ------------------------------------------------------------------
 echo "doctor:"
-"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+"$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes on a healthy install" "$?" "0"
 
 # A valid credential that reaches zero repos passes every other check and only
 # fails at clone time -- doctor has to catch it.
-FAKE_REPO_COUNT=0 "$ROOT/bin/agent-id" doctor > "$SB/doctor.out" 2>&1
+FAKE_REPO_COUNT=0 "$ROOT/bin/guise" doctor > "$SB/doctor.out" 2>&1
 expect_eq "doctor fails when the installation reaches no repos" "$?" "1"
 expect "the failure names the installation reachability check" \
   grep -q "FAIL  installation reaches at least one repository" "$SB/doctor.out"
-"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+"$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes again once the installation has a repo" "$?" "0"
 
 # --- file key store ----------------------------------------------------------
@@ -251,35 +251,35 @@ echo "file key store:"
 new_sandbox
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "file-store setup exits 0" "$?" "0"
-keyfile="$HOME/.config/agent-id/keys/$APP_IDENT.pem"
+keyfile="$HOME/.config/guise/keys/$APP_IDENT.pem"
 expect "key file written" test -f "$keyfile"
 expect_eq "key file mode 600" \
   "$(stat -c '%a' "$keyfile" 2>/dev/null || stat -f '%Lp' "$keyfile")" "600"
 expect_eq "keysource recorded" "$(cfg identity.$APP_IDENT.keysource)" "file"
 expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/test-agent"
 expect "PEM shredded after storing" test ! -e "$SB/key.pem"
-t=$("$HOME/.local/bin/agent-id-token" "$APP_IDENT")
+t=$("$HOME/.local/bin/guise-token" "$APP_IDENT")
 expect_eq "token mints from file key" "${t:0:4}" "ghs_"
 run_setup >/dev/null 2>&1
 expect_eq "re-run without --store keeps the file store" "$(cfg identity.$APP_IDENT.keysource)" "file"
 expect "re-run did not move the key into 1Password" test ! -e "$OP_FAKE_DIR/Private/test-agent"
 run_setup --store file --name second >/dev/null 2>&1
 expect_eq "second file identity reuses key without --pem" "$?" "0"
-expect "second identity got its own key file" test -f "$HOME/.config/agent-id/keys/second.pem"
-"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+expect "second identity got its own key file" test -f "$HOME/.config/guise/keys/second.pem"
+"$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes with file store" "$?" "0"
-FAKE_STAT_GNU=1 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+FAKE_STAT_GNU=1 "$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor reads app-key permissions with GNU stat semantics" "$?" "0"
-"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
 expect "uninstall keeps key files" test -f "$keyfile"
-expect "uninstall removes config file" test ! -e "$HOME/.config/agent-id/config"
-expect "uninstall removes rendered git dir" test ! -e "$HOME/.config/agent-id/git"
+expect "uninstall removes config file" test ! -e "$HOME/.config/guise/config"
+expect "uninstall removes rendered git dir" test ! -e "$HOME/.config/guise/git"
 
 # --- user account identity ---------------------------------------------------
 echo "user account identity:"
 new_sandbox
 printf 'github_pat_stub123\n' > "$SB/pat.txt"
-"$ROOT/bin/agent-id" setup --kind user --token-file "$SB/pat.txt" \
+"$ROOT/bin/guise" setup --kind user --token-file "$SB/pat.txt" \
   --op-account my.1password.com </dev/null >/dev/null 2>&1
 expect_eq "user setup exits 0" "$?" "0"
 expect_eq "kind recorded" "$(cfg identity.$USER_IDENT.kind)" "user"
@@ -290,8 +290,8 @@ expect_eq "token expiry recorded" \
 expect "token stored in 1Password" test -f "$OP_FAKE_DIR/Private/patrick-agent/token"
 expect "token file shredded" test ! -e "$SB/pat.txt"
 expect_eq "token helper returns the PAT verbatim" \
-  "$("$HOME/.local/bin/agent-id-token" "$USER_IDENT")" "github_pat_stub123"
-expect "PAT is not cached to disk" test ! -e "$XDG_CACHE_HOME/agent-id/$USER_IDENT.token.json"
+  "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_stub123"
+expect "PAT is not cached to disk" test ! -e "$XDG_CACHE_HOME/guise/$USER_IDENT.token.json"
 
 repo="$HOME/agentic-code/$USER_IDENT/usertest"
 git init -q "$repo"
@@ -299,60 +299,60 @@ expect_eq "account identity applies inside scope" \
   "$(git -C "$repo" config --get user.email)" "4444+patrick-agent@users.noreply.github.com"
 expect_eq "commits are authored by the account, not a bot" \
   "$(git -C "$repo" config --get user.name)" "patrick-agent"
-"$ROOT/bin/agent-id" doctor --name "$USER_IDENT" >/dev/null 2>&1
+"$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes for a user identity" "$?" "0"
 
-FAKE_REPO_COUNT=0 "$ROOT/bin/agent-id" doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+FAKE_REPO_COUNT=0 "$ROOT/bin/guise" doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
 expect_eq "doctor fails when the PAT reaches no repos" "$?" "1"
 expect "the failure names the token reachability check" \
   grep -q "FAIL  token reaches at least one repository" "$SB/doctor.out"
-"$ROOT/bin/agent-id" doctor --name "$USER_IDENT" >/dev/null 2>&1
+"$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes again once the PAT reaches a repo" "$?" "0"
 
-"$ROOT/bin/agent-id" setup --kind user </dev/null >/dev/null 2>&1
+"$ROOT/bin/guise" setup --kind user </dev/null >/dev/null 2>&1
 expect_eq "re-run without --token-file reuses the stored token" "$?" "0"
 
 # App and user identities have to coexist: they share basedir and ~/.gitconfig.
 run_setup --name bot --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "app identity alongside a user identity" "$?" "0"
 expect_eq "both identities in the owned gitconfig" \
-  "$(grep -c includeIf "$HOME/.config/agent-id/gitconfig")" "2"
-"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+  "$(grep -c includeIf "$HOME/.config/guise/gitconfig")" "2"
+"$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes with both kinds present" "$?" "0"
 
 # --- user identity guardrails ------------------------------------------------
 echo "user identity guardrails:"
 printf 'github_pat_other\n' > "$SB/pat2.txt"
-FAKE_GH_LOGIN=patrick-agent "$ROOT/bin/agent-id" setup --kind user --name mine \
+FAKE_GH_LOGIN=patrick-agent "$ROOT/bin/guise" setup --kind user --name mine \
   --token-file "$SB/pat2.txt" </dev/null >/dev/null 2>&1
 expect_eq "refuses a token for your own account" "$?" "1"
 expect "refused setup leaves the token file alone" test -f "$SB/pat2.txt"
-"$ROOT/bin/agent-id" setup --kind user --name mine --login someone-else \
+"$ROOT/bin/guise" setup --kind user --name mine --login someone-else \
   --token-file "$SB/pat2.txt" </dev/null >/dev/null 2>&1
 expect_eq "refuses a token that isn't the --login account" "$?" "1"
-"$ROOT/bin/agent-id" setup --kind user --name mine --app-id 1111 </dev/null >/dev/null 2>&1
+"$ROOT/bin/guise" setup --kind user --name mine --app-id 1111 </dev/null >/dev/null 2>&1
 expect_eq "rejects app-only flags on a user identity" "$?" "1"
-git config -f "$HOME/.config/agent-id/config" identity.$USER_IDENT.tokenexpires "2000-01-01 00:00:00 UTC"
-"$ROOT/bin/agent-id" doctor --name "$USER_IDENT" >/dev/null 2>&1
+git config -f "$HOME/.config/guise/config" identity.$USER_IDENT.tokenexpires "2000-01-01 00:00:00 UTC"
+"$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor fails on a PAT inside its last 30 days" "$?" "1"
 
 # --- user identity with the file store ---------------------------------------
 echo "user identity, file store:"
 new_sandbox
 printf 'github_pat_filestore\n' > "$SB/pat.txt"
-"$ROOT/bin/agent-id" setup --kind user --store file --token-file "$SB/pat.txt" \
+"$ROOT/bin/guise" setup --kind user --store file --token-file "$SB/pat.txt" \
   </dev/null >/dev/null 2>&1
 expect_eq "file-store user setup exits 0" "$?" "0"
-tokenfile="$HOME/.config/agent-id/keys/$USER_IDENT.token"
+tokenfile="$HOME/.config/guise/keys/$USER_IDENT.token"
 expect "token file written" test -f "$tokenfile"
 expect_eq "token file mode 600" \
   "$(stat -c '%a' "$tokenfile" 2>/dev/null || stat -f '%Lp' "$tokenfile")" "600"
 expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/patrick-agent"
 expect_eq "token helper reads the file" \
-  "$("$HOME/.local/bin/agent-id-token" "$USER_IDENT")" "github_pat_filestore"
-"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+  "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_filestore"
+"$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes with a file-stored PAT" "$?" "0"
-FAKE_STAT_GNU=1 "$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+FAKE_STAT_GNU=1 "$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor reads token permissions with GNU stat semantics" "$?" "0"
 
 # The store is settled only after the identity name is, so an unrelated
@@ -364,11 +364,11 @@ expect_eq "new identity does not inherit the default's file store" \
 expect "new identity's key went to 1Password" \
   test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
 expect "new identity's key not written to disk" \
-  test ! -e "$HOME/.config/agent-id/keys/$APP_IDENT.pem"
+  test ! -e "$HOME/.config/guise/keys/$APP_IDENT.pem"
 run_setup >/dev/null 2>&1
 expect_eq "re-running the app identity keeps 1Password" \
   "$(cfg identity.$APP_IDENT.keysource)" "op"
-"$ROOT/bin/agent-id" setup --kind user </dev/null >/dev/null 2>&1
+"$ROOT/bin/guise" setup --kind user </dev/null >/dev/null 2>&1
 expect_eq "re-running the user identity keeps its file store" \
   "$(cfg identity.$USER_IDENT.keysource)" "file"
 
@@ -380,47 +380,47 @@ expect_eq "identity is named after the app slug" "$(cfg identity.test-agent.slug
 expect "directory is named after the agent" test -d "$HOME/agentic-code/test-agent"
 expect "no 'default' directory is created" test ! -e "$HOME/agentic-code/default"
 expect_eq "first identity becomes the default" "$(cfg core.defaultidentity)" "test-agent"
-expect_eq "'default' subcommand reports it" "$("$ROOT/bin/agent-id" default)" "test-agent"
+expect_eq "'default' subcommand reports it" "$("$ROOT/bin/guise" default)" "test-agent"
 expect_eq "token with no identity resolves the default" \
-  "$("$HOME/.local/bin/agent-id-token")" "$("$HOME/.local/bin/agent-id-token" test-agent)"
+  "$("$HOME/.local/bin/guise-token")" "$("$HOME/.local/bin/guise-token" test-agent)"
 
 openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
 run_setup --store file --name explicit --pem "$SB/key2.pem" >/dev/null 2>&1
 expect "--name still wins over the derived name" test -d "$HOME/agentic-code/explicit"
 expect_eq "a later identity does not steal the default" "$(cfg core.defaultidentity)" "test-agent"
-"$ROOT/bin/agent-id" default explicit >/dev/null 2>&1
+"$ROOT/bin/guise" default explicit >/dev/null 2>&1
 expect_eq "default can be repointed" "$(cfg core.defaultidentity)" "explicit"
 openssl genrsa -out "$SB/key3.pem" 2048 2>/dev/null
 run_setup --store file --name claimed --pem "$SB/key3.pem" --default >/dev/null 2>&1
 expect_eq "--default claims the default identity" "$(cfg core.defaultidentity)" "claimed"
-"$ROOT/bin/agent-id" default nonesuch >/dev/null 2>&1
+"$ROOT/bin/guise" default nonesuch >/dev/null 2>&1
 expect_eq "default rejects an unknown identity" "$?" "1"
 
 # --- rename -------------------------------------------------------------------
 echo "rename:"
-"$ROOT/bin/agent-id" default test-agent >/dev/null 2>&1
+"$ROOT/bin/guise" default test-agent >/dev/null 2>&1
 mkdir -p "$HOME/agentic-code/test-agent/someclone"
-"$ROOT/bin/agent-id" rename test-agent renamed >/dev/null 2>&1
+"$ROOT/bin/guise" rename test-agent renamed >/dev/null 2>&1
 expect_eq "rename exits 0" "$?" "0"
 expect "clones move with the identity" test -d "$HOME/agentic-code/renamed/someclone"
 expect "old directory is gone" test ! -e "$HOME/agentic-code/test-agent"
 expect_eq "config section renamed" "$(cfg identity.renamed.slug)" "test-agent"
 expect_eq "old config section gone" "$(cfg identity.test-agent.slug 2>/dev/null)" ""
-expect "key file renamed" test -f "$HOME/.config/agent-id/keys/renamed.pem"
+expect "key file renamed" test -f "$HOME/.config/guise/keys/renamed.pem"
 expect_eq "keyfile path updated" \
-  "$(cfg identity.renamed.keyfile)" "$HOME/.config/agent-id/keys/renamed.pem"
-expect "rendered conf renamed" test -f "$HOME/.config/agent-id/git/renamed.conf"
-expect "old rendered conf gone" test ! -e "$HOME/.config/agent-id/git/test-agent.conf"
+  "$(cfg identity.renamed.keyfile)" "$HOME/.config/guise/keys/renamed.pem"
+expect "rendered conf renamed" test -f "$HOME/.config/guise/git/renamed.conf"
+expect "old rendered conf gone" test ! -e "$HOME/.config/guise/git/test-agent.conf"
 expect_eq "default follows the rename" "$(cfg core.defaultidentity)" "renamed"
 git init -q "$HOME/agentic-code/renamed/newrepo"
 expect_eq "identity applies under the new directory" \
   "$(git -C "$HOME/agentic-code/renamed/newrepo" config --get user.email)" \
   "3333+test-agent[bot]@users.noreply.github.com"
-"$ROOT/bin/agent-id" doctor >/dev/null 2>&1
+"$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes after rename" "$?" "0"
-"$ROOT/bin/agent-id" rename renamed explicit >/dev/null 2>&1
+"$ROOT/bin/guise" rename renamed explicit >/dev/null 2>&1
 expect_eq "rename refuses a name already in use" "$?" "1"
-"$ROOT/bin/agent-id" rename nonesuch whatever >/dev/null 2>&1
+"$ROOT/bin/guise" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
 
 # --- clone ---------------------------------------------------------------------
@@ -452,7 +452,7 @@ expect "clone from outside the base directory uses the default" \
 
 # setup keeps the path it was given, so both spellings of the same basedir have
 # to resolve the same identity.
-git config -f "$HOME/.config/agent-id/config" core.basedir "$HOME/agentic-code/"
+git config -f "$HOME/.config/guise/config" core.basedir "$HOME/agentic-code/"
 ( cd "$HOME/agentic-code/platform" && agent clone owner/five ) >/dev/null 2>&1
 expect "a trailing slash on basedir still selects the current identity" \
   test -d "$HOME/agentic-code/platform/five/.git"
@@ -460,14 +460,14 @@ expect "a trailing slash on basedir still selects the current identity" \
 # A basedir of / puts identity directories at the root, so this one clone
 # lands outside the sandbox by definition. Keep the destination unpredictable
 # and take it away again.
-root_dest=$(mktemp -d /tmp/agent-id-root.XXXXXX)
+root_dest=$(mktemp -d /tmp/guise-root.XXXXXX)
 root_repo=${root_dest##*/}
 # clone refuses an existing destination, even an empty one.
 rmdir "$root_dest"
 git init -q --bare "$SB/origins/owner/$root_repo.git"
-git config -f "$HOME/.config/agent-id/config" --rename-section identity.platform identity.tmp
-git config -f "$HOME/.config/agent-id/config" core.basedir /
-root_cwd=$(mktemp -d /tmp/agent-id-root.XXXXXX)
+git config -f "$HOME/.config/guise/config" --rename-section identity.platform identity.tmp
+git config -f "$HOME/.config/guise/config" core.basedir /
+root_cwd=$(mktemp -d /tmp/guise-root.XXXXXX)
 ( cd "$root_cwd" && agent clone "owner/$root_repo" ) >/dev/null 2>&1
 expect "a root basedir treats an absolute current directory as contained" \
   test -d "$root_dest/.git"
@@ -484,11 +484,11 @@ run_setup --store file --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
 cat > "$SB/recording-shell" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$PWD" > "$SB/use.pwd"
-printf '%s\n' "\${AGENT_ID_IDENTITY:-}" > "$SB/use.identity"
+printf '%s\n' "\${GUISE_IDENTITY:-}" > "$SB/use.identity"
 EOF
 chmod +x "$SB/recording-shell"
 
-SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use platform </dev/null >/dev/null 2>&1
+SHELL="$SB/recording-shell" "$ROOT/bin/guise" use platform </dev/null >/dev/null 2>&1
 expect_eq "use lands in the named identity's directory" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
 # Nothing is exported: the directory is what carries the identity, so there is
@@ -496,7 +496,7 @@ expect_eq "use lands in the named identity's directory" \
 expect_eq "and exports nothing to go stale" "$(cat "$SB/use.identity")" ""
 
 rm -f "$SB/use.pwd"
-SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use </dev/null >/dev/null 2>&1
+SHELL="$SB/recording-shell" "$ROOT/bin/guise" use </dev/null >/dev/null 2>&1
 expect_eq "no name lands in the default identity's directory" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/$APP_IDENT"
 
@@ -504,12 +504,12 @@ expect_eq "no name lands in the default identity's directory" \
 # the config apart from any first-identity fallback.
 rm -f "$SB/use.pwd"
 agent default platform >/dev/null
-SHELL="$SB/recording-shell" "$ROOT/bin/agent-id" use </dev/null >/dev/null 2>&1
+SHELL="$SB/recording-shell" "$ROOT/bin/guise" use </dev/null >/dev/null 2>&1
 expect_eq "and follows the default when it moves" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
 
 # Nothing configured and more than one identity: there is no right guess.
-git config -f "$HOME/.config/agent-id/config" --unset core.defaultidentity
+git config -f "$HOME/.config/guise/config" --unset core.defaultidentity
 expect_fail "use refuses to guess with no default and several identities" agent use
 agent default "$APP_IDENT" >/dev/null
 
@@ -521,19 +521,19 @@ expect_eq "--emit-shell prints just the cd, shell-quoted" \
   "$(agent use platform --emit-shell)" "cd '$HOME/agentic-code/platform'"
 expect_eq "sourcing the hook makes use cd the running bash" \
   "$(PATH="$HOME/.local/bin:$PATH" bash -c \
-      'cd "$HOME"; . "$HOME/.config/agent-id/hook.sh"; agent-id use platform; printf %s "$PWD"')" \
+      'cd "$HOME"; . "$HOME/.config/guise/hook.sh"; guise use platform; printf %s "$PWD"')" \
   "$HOME/agentic-code/platform"
 expect_eq "and passes every other subcommand straight through" \
   "$(PATH="$HOME/.local/bin:$PATH" bash -c \
-      '. "$HOME/.config/agent-id/hook.sh"; agent-id default')" \
+      '. "$HOME/.config/guise/hook.sh"; guise default')" \
   "$APP_IDENT"
 expect_fail "and reports failure without moving the shell" \
   env PATH="$HOME/.local/bin:$PATH" bash -c \
-      '. "$HOME/.config/agent-id/hook.sh"; agent-id use nonesuch'
+      '. "$HOME/.config/guise/hook.sh"; guise use nonesuch'
 if command -v zsh >/dev/null; then
   expect_eq "sourcing the hook makes use cd the running zsh" \
     "$(PATH="$HOME/.local/bin:$PATH" zsh -c \
-        'cd "$HOME"; . "$HOME/.config/agent-id/hook.sh"; agent-id use platform; printf %s "$PWD"')" \
+        'cd "$HOME"; . "$HOME/.config/guise/hook.sh"; guise use platform; printf %s "$PWD"')" \
     "$HOME/agentic-code/platform"
 else
   echo "  skip  sourcing the hook makes use cd the running zsh (zsh not installed)"
@@ -545,13 +545,13 @@ fi
 # and its pattern substitution is where the escaping goes wrong. The eval that
 # checks the result can run under any bash -- a mangled quote is a syntax error
 # in every one of them.
-quoted_base="$HOME/pat's ünïcode agent-id"
-git config -f "$HOME/.config/agent-id/config" core.basedir "$quoted_base"
-emitted=$(/bin/bash "$ROOT/bin/agent-id" use platform --emit-shell </dev/null)
+quoted_base="$HOME/pat's ünïcode guise"
+git config -f "$HOME/.config/guise/config" core.basedir "$quoted_base"
+emitted=$(/bin/bash "$ROOT/bin/guise" use platform --emit-shell </dev/null)
 expect_eq "a quote in the path survives the eval the hook does" \
   "$(cd "$HOME" && eval "$emitted" 2>/dev/null; printf %s "$PWD")" \
   "$quoted_base/platform"
-git config -f "$HOME/.config/agent-id/config" core.basedir "$HOME/agentic-code"
+git config -f "$HOME/.config/guise/config" core.basedir "$HOME/agentic-code"
 
 # A shell hook nobody sourced is a missing convenience, not a broken identity,
 # so doctor says so without failing.
@@ -586,25 +586,25 @@ run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 expect "setup leaves ~/.zshrc a symlink" test -L "$HOME/.zshrc"
 expect "setup leaves ~/.gitconfig a symlink" test -L "$HOME/.gitconfig"
 expect_eq "the rc block lands in the file the link points at" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/dotfiles/zshrc")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/dotfiles/zshrc")" "1"
 expect_eq "and the gitconfig block does too" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/dotfiles/gitconfig")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/dotfiles/gitconfig")" "1"
 expect_eq "the target's mode is untouched" "$(file_mode "$HOME/dotfiles/zshrc")" "640"
 
 # The replace path, which only runs when a block is already there and differs.
 # It spans lines, and `awk -v` cannot carry a newline -- BWK awk on macOS errors
 # out -- so a stale block has to survive a re-run.
-printf 'alias ll="ls -l"\n\n# >>> agent-id >>>\nstale\n# <<< agent-id <<<\n' \
+printf 'alias ll="ls -l"\n\n# >>> guise >>>\nstale\n# <<< guise <<<\n' \
   > "$HOME/dotfiles/zshrc"
 run_setup --store file > "$SB/replace.out" 2>&1
 expect_eq "re-running setup over a stale block exits 0" "$?" "0"
 expect_eq "the stale block is replaced, not duplicated" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/dotfiles/zshrc")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/dotfiles/zshrc")" "1"
 expect "and the replacement is the real source line" \
   grep -qF 'hook.sh' "$HOME/dotfiles/zshrc"
 expect "through the symlink, which is still a symlink" test -L "$HOME/.zshrc"
 
-"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
 expect "uninstall leaves ~/.zshrc a symlink" test -L "$HOME/.zshrc"
 expect "uninstall leaves ~/.gitconfig a symlink" test -L "$HOME/.gitconfig"
 expect "rc target byte-identical to pre-setup" \
@@ -618,18 +618,18 @@ expect "gitconfig target byte-identical to pre-setup" \
 # human wrote, so refuse the file and leave it alone.
 echo "stray markers:"
 new_sandbox
-printf 'alias ll="ls -l"\n# >>> agent-id >>>\nexport IMPORTANT=1\n' > "$HOME/.zshrc"
+printf 'alias ll="ls -l"\n# >>> guise >>>\nexport IMPORTANT=1\n' > "$HOME/.zshrc"
 cp "$HOME/.zshrc" "$SB/zshrc.pre"
 run_setup --store file --pem "$SB/key.pem" > "$SB/stray.out" 2>&1
 expect_eq "setup fails on an rc with an orphan start marker" "$?" "1"
 expect "and names the file to fix" \
-  grep -qF "error: ~/.zshrc has a stray agent-id marker" "$SB/stray.out"
+  grep -qF "error: ~/.zshrc has a stray guise marker" "$SB/stray.out"
 expect "and the lines below the orphan are still there" \
   cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
 
 new_sandbox
-printf '\n# >>> agent-id >>>\nstale\n# <<< agent-id <<<\n' >> "$HOME/.gitconfig"
-printf '\n# >>> agent-id >>>\nstale\n# <<< agent-id <<<\n' >> "$HOME/.gitconfig"
+printf '\n# >>> guise >>>\nstale\n# <<< guise <<<\n' >> "$HOME/.gitconfig"
+printf '\n# >>> guise >>>\nstale\n# <<< guise <<<\n' >> "$HOME/.gitconfig"
 cp "$HOME/.gitconfig" "$SB/gitconfig.pre"
 run_setup --store file --pem "$SB/key.pem" > "$SB/dup.out" 2>&1
 expect_eq "setup fails on a gitconfig carrying two blocks" "$?" "1"
@@ -639,16 +639,16 @@ expect "and leaves it untouched rather than picking one" \
 # A line that only quotes the marker text is ordinary shell, not wiring. Marker
 # discovery compares whole lines for that reason, and setup has to sail past it.
 new_sandbox
-printf 'echo "# >>> agent-id >>>"\nalias ll="ls -l"\n' > "$HOME/.zshrc"
+printf 'echo "# >>> guise >>>"\nalias ll="ls -l"\n' > "$HOME/.zshrc"
 run_setup --store file --pem "$SB/key.pem" > "$SB/quoted.out" 2>&1
 expect_eq "setup ignores a line that merely quotes a marker" "$?" "0"
 expect "and the line is still there afterwards" \
-  grep -qxF 'echo "# >>> agent-id >>>"' "$HOME/.zshrc"
+  grep -qxF 'echo "# >>> guise >>>"' "$HOME/.zshrc"
 expect_eq "with exactly one real block added below it" \
-  "$(grep -cxF '# >>> agent-id >>>' "$HOME/.zshrc")" "1"
-"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+  "$(grep -cxF '# >>> guise >>>' "$HOME/.zshrc")" "1"
+"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
 expect_eq "and uninstall takes the block, not the quoted line" \
-  "$(cat "$HOME/.zshrc")" "$(printf 'echo "# >>> agent-id >>>"\nalias ll="ls -l"')"
+  "$(cat "$HOME/.zshrc")" "$(printf 'echo "# >>> guise >>>"\nalias ll="ls -l"')"
 
 # Restore is byte-for-byte, which includes a file that never ended in a newline:
 # awk's print would quietly add one and uninstall would hand back a longer file.
@@ -656,7 +656,7 @@ new_sandbox
 printf 'alias ll="ls -l"' > "$HOME/.zshrc"
 cp "$HOME/.zshrc" "$SB/zshrc.pre"
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
-"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
 expect "an rc with no trailing newline comes back byte-identical" \
   cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
 
@@ -672,7 +672,7 @@ run_setup_user --store file --sign --token-file "$SB/pat.txt" >"$SB/sign.out" 2>
 # Non-zero, and correctly so: the key is not on the account yet, which is a real
 # gap doctor has to report. Putting it there is a browser step.
 expect_eq "setup ends non-zero while the key is not on the account" "$?" "1"
-signkey="$HOME/.config/agent-id/keys/$USER_IDENT.signing"
+signkey="$HOME/.config/guise/keys/$USER_IDENT.signing"
 expect_eq "signing recorded in config" "$(cfg identity.$USER_IDENT.signing)" "ssh"
 expect_eq "signingkey points into the keys dir" "$(cfg identity.$USER_IDENT.signingkey)" "$signkey"
 expect "private half generated" test -f "$signkey"
@@ -716,7 +716,7 @@ expect_eq "the commit carries a good signature" \
   "$(git -C "$signrepo" log -1 --format='%G?')" "G"
 expect "allowed signers file names the agent's commit email" \
   grep -q "^4444+$USER_IDENT@users\.noreply\.github\.com namespaces=\"git\" ssh-ed25519 " \
-  "$HOME/.config/agent-id/git/$USER_IDENT.allowed_signers"
+  "$HOME/.config/guise/git/$USER_IDENT.allowed_signers"
 
 # Paste the key into the account's signing keys page, the way a human does.
 echo "once the key is on the account:"
@@ -747,15 +747,15 @@ echo "turning signing back off:"
 new_token_file "$SB/pat2.txt"
 run_setup_user --name gated --store file --sign --token-file "$SB/pat2.txt" >/dev/null 2>&1
 expect "a second signing identity got its own key" \
-  test -f "$HOME/.config/agent-id/keys/gated.signing"
+  test -f "$HOME/.config/guise/keys/gated.signing"
 expect_eq "with signing on" "$(cfg identity.gated.signing)" "ssh"
 run_setup_user --name gated --no-sign >/dev/null 2>&1
 expect_eq "--no-sign exits 0" "$?" "0"
 expect_fail "signing unset in config" cfg identity.gated.signing
 expect_fail "signingkey unset too" cfg identity.gated.signingkey
-expect "local private key shredded" test ! -e "$HOME/.config/agent-id/keys/gated.signing"
-expect "public half removed with it" test ! -e "$HOME/.config/agent-id/keys/gated.signing.pub"
-expect "allowed signers file removed" test ! -e "$HOME/.config/agent-id/git/gated.allowed_signers"
+expect "local private key shredded" test ! -e "$HOME/.config/guise/keys/gated.signing"
+expect "public half removed with it" test ! -e "$HOME/.config/guise/keys/gated.signing.pub"
+expect "allowed signers file removed" test ! -e "$HOME/.config/guise/git/gated.allowed_signers"
 gatedrepo="$HOME/agentic-code/gated/scoped"
 git init -q "$gatedrepo"
 expect_eq "gpgsign back off inside scope" \
@@ -770,7 +770,7 @@ expect_eq "doctor passes with signing off again" "$?" "0"
 echo "a --no-sign that dies partway:"
 new_token_file "$SB/pat3.txt"
 run_setup_user --name opsign --sign --token-file "$SB/pat3.txt" >/dev/null 2>&1
-opkey="$HOME/.config/agent-id/keys/opsign.signing"
+opkey="$HOME/.config/guise/keys/opsign.signing"
 expect "an op-store identity gets a signing key too" test -f "$opkey"
 new_token_file "$SB/pat4.txt"
 OP_FAKE_FORBID=1 run_setup_user --name opsign --no-sign \
@@ -792,11 +792,11 @@ echo "signing survives rename:"
 agent rename "$USER_IDENT" bot-renamed >/dev/null 2>&1
 expect_eq "rename exits 0" "$?" "0"
 expect_eq "signingkey follows the rename" \
-  "$(cfg identity.bot-renamed.signingkey)" "$HOME/.config/agent-id/keys/bot-renamed.signing"
-expect "renamed private key exists" test -f "$HOME/.config/agent-id/keys/bot-renamed.signing"
-expect "renamed public key exists" test -f "$HOME/.config/agent-id/keys/bot-renamed.signing.pub"
+  "$(cfg identity.bot-renamed.signingkey)" "$HOME/.config/guise/keys/bot-renamed.signing"
+expect "renamed private key exists" test -f "$HOME/.config/guise/keys/bot-renamed.signing"
+expect "renamed public key exists" test -f "$HOME/.config/guise/keys/bot-renamed.signing.pub"
 expect "stale allowed signers removed" \
-  test ! -e "$HOME/.config/agent-id/git/$USER_IDENT.allowed_signers"
+  test ! -e "$HOME/.config/guise/git/$USER_IDENT.allowed_signers"
 renamedsign="$HOME/agentic-code/bot-renamed/scoped"
 git init -q "$renamedsign"
 ( cd "$renamedsign" && echo x > f && git add f && git commit -q -m "still signed" )
@@ -806,7 +806,7 @@ expect_eq "commits still verify under the new name" \
 # they are -- same policy as the 1Password items and the on-disk PATs.
 agent uninstall --yes >"$SB/uninstall.out" 2>&1
 expect "uninstall leaves the signing key alone" \
-  test -f "$HOME/.config/agent-id/keys/bot-renamed.signing"
+  test -f "$HOME/.config/guise/keys/bot-renamed.signing"
 expect "and names the public half still on the account" \
   grep -q 'public signing key on the agent account' "$SB/uninstall.out"
 
@@ -819,23 +819,23 @@ export FAKE_GH_LOGIN=PatrickTulskie
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 new_token_file "$SB/pat.txt"
 run_setup_user --store file --sign --token-file "$SB/pat.txt" >/dev/null 2>&1
-awk '{print $1" "$2}' "$HOME/.config/agent-id/keys/$USER_IDENT.signing.pub" \
+awk '{print $1" "$2}' "$HOME/.config/guise/keys/$USER_IDENT.signing.pub" \
   >> "$SIGNING_KEYS_FILE"
 
-confdir="$HOME/.config/agent-id/git"
-cfgfile="$HOME/.config/agent-id/config"
+confdir="$HOME/.config/guise/git"
+cfgfile="$HOME/.config/guise/config"
 cfg_before=$(shasum < "$cfgfile")
 # Clobber everything update owns; leave everything it must not touch alone.
-echo broken > "$HOME/.local/bin/agent-gh"
-echo broken > "$HOME/.config/agent-id/hook.sh"
-echo broken > "$HOME/.local/bin/agent-id-token"
+echo broken > "$HOME/.local/bin/guise-gh"
+echo broken > "$HOME/.config/guise/hook.sh"
+echo broken > "$HOME/.local/bin/guise-token"
 echo broken > "$confdir/agent-hooks/prepare-commit-msg"
 echo broken > "$confdir/$APP_IDENT.conf"
 echo broken > "$confdir/$USER_IDENT.conf"
 # The wiring too, or update could stop calling regen_owned_gitconfig and
 # ensure_include_block and every assertion below would still pass. The alias
 # stands in for whatever else the engineer keeps in ~/.gitconfig.
-echo "# clobbered" > "$HOME/.config/agent-id/gitconfig"
+echo "# clobbered" > "$HOME/.config/guise/gitconfig"
 cat > "$HOME/.gitconfig" <<'GITCONFIG'
 [user]
 	name = Human
@@ -851,10 +851,10 @@ GITCONFIG
 OP_FAKE_FORBID=1 agent update >/dev/null 2>&1
 expect_eq "update exits 0 with 1Password refusing every call" "$?" "0"
 expect_eq "and having made no API calls at all" "$(grep -c . "$CURL_LOG")" "0"
-expect "agent-gh reinstalled" grep -q GH_TOKEN "$HOME/.local/bin/agent-gh"
-expect "token helper reinstalled" grep -q 'agent-id-token' "$HOME/.local/bin/agent-id-token"
+expect "guise-gh reinstalled" grep -q GH_TOKEN "$HOME/.local/bin/guise-gh"
+expect "token helper reinstalled" grep -q 'guise-token' "$HOME/.local/bin/guise-token"
 expect "commit hook reinstalled" grep -q 'Co-authored-by' "$confdir/agent-hooks/prepare-commit-msg"
-expect "shell hook reinstalled" grep -q 'emit-shell' "$HOME/.config/agent-id/hook.sh"
+expect "shell hook reinstalled" grep -q 'emit-shell' "$HOME/.config/guise/hook.sh"
 expect_eq "config left byte-identical" "$(shasum < "$cfgfile")" "$cfg_before"
 # A bare `setup` re-renders only the identity it ran for; update does all of them.
 expect "app identity conf re-rendered" \
@@ -863,7 +863,7 @@ expect "user identity conf re-rendered too" \
   grep -q "4444+$USER_IDENT@users\.noreply\.github\.com" "$confdir/$USER_IDENT.conf"
 expect "a signing identity still signs afterwards" \
   grep -q 'gpgsign = true' "$confdir/$USER_IDENT.conf"
-owned="$HOME/.config/agent-id/gitconfig"
+owned="$HOME/.config/guise/gitconfig"
 expect_eq "owned gitconfig regenerated, one includeIf per identity" \
   "$(grep -c includeIf "$owned")" "2"
 # A count alone passes when both entries name the same identity, so pair each
@@ -874,7 +874,7 @@ for id in "$APP_IDENT" "$USER_IDENT"; do
     "git/$id.conf"
 done
 expect_eq "the managed include block is back in ~/.gitconfig" \
-  "$(grep -cF '# >>> agent-id >>>' "$HOME/.gitconfig")" "1"
+  "$(grep -cF '# >>> guise >>>' "$HOME/.gitconfig")" "1"
 expect "unrelated global config survived" grep -q 'lg = log --oneline' "$HOME/.gitconfig"
 expect_eq "and the human's own identity with it" \
   "$(git -C "$SB" config --get user.email)" "human@example.com"
@@ -890,10 +890,10 @@ expect_eq "and commits made after an update still verify" \
   "$(git -C "$uprepo" log -1 --format='%G?')" "G"
 
 # The installed copy is the thing being updated, so prove it actually moves.
-echo '# stale' >> "$HOME/.local/bin/agent-id"
+echo '# stale' >> "$HOME/.local/bin/guise"
 agent update >/dev/null 2>&1
 expect "the installed script is replaced by the one being run" \
-  cmp -s "$ROOT/bin/agent-id" "$HOME/.local/bin/agent-id"
+  cmp -s "$ROOT/bin/guise" "$HOME/.local/bin/guise"
 snap_up=$(snapshot)
 agent update >/dev/null 2>&1
 expect_eq "a second update changes nothing" "$(snapshot)" "$snap_up"
@@ -911,13 +911,13 @@ printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
 cp "$HOME/.gitconfig" "$SB/gitconfig.pre"
 cp "$HOME/.zshrc" "$SB/zshrc.pre"
 run_setup --pem "$SB/key.pem" >/dev/null 2>&1
-"$ROOT/bin/agent-id" uninstall --yes >/dev/null 2>&1
+"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
 expect_eq "uninstall exits 0" "$?" "0"
 expect "~/.gitconfig byte-identical to pre-setup" cmp -s "$HOME/.gitconfig" "$SB/gitconfig.pre"
 expect "~/.zshrc byte-identical to pre-setup" cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
-expect "config dir removed" test ! -e "$HOME/.config/agent-id"
-expect "token cache removed" test ! -e "$XDG_CACHE_HOME/agent-id"
-expect "helpers removed" test ! -e "$HOME/.local/bin/agent-id-token"
+expect "config dir removed" test ! -e "$HOME/.config/guise"
+expect "token cache removed" test ! -e "$XDG_CACHE_HOME/guise"
+expect "helpers removed" test ! -e "$HOME/.local/bin/guise-token"
 expect "1Password item left alone" test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
 expect "agent dir left alone" test -d "$HOME/agentic-code/$APP_IDENT"
 expect_eq "human git identity unchanged" \
