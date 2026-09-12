@@ -423,7 +423,8 @@ EOF
 write_hook() {
   cat <<'EOF'
 #!/usr/bin/env bash
-# Make the human the sole co-author of every agent commit.
+# Credit the human as co-author on every commit the agent authors, in place of
+# the one a harness stamps for itself.
 #
 # prepare-commit-msg (not commit-msg) so `git commit -m` is covered.
 # The trailer survives rebase merge and is parsed natively by GitHub,
