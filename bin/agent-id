@@ -450,6 +450,11 @@ if [[ -n "$GIT_DIR_PATH" ]]; then
     if [[ -e "$GIT_DIR_PATH/$marker" ]]; then exit 0; fi
   done
 fi
+# A clean revert never stops the sequencer, so REVERT_HEAD is gone again by the
+# time the message is prepared -- the marker above only catches a revert that
+# conflicted. What survives either way is the line git generates, which carries
+# no translation, so it reads the same in every locale.
+if grep -qE '^This reverts commit [0-9a-f]{7,}\.$' "$MSG_FILE"; then exit 0; fi
 # Cherry-pick leaves GIT_AUTHOR_EMAIL unset, so this catches --author, not that.
 if [[ -n "${GIT_AUTHOR_EMAIL:-}" && -n "$SELF_EMAIL" \
       && "$GIT_AUTHOR_EMAIL" != "$SELF_EMAIL" ]]; then

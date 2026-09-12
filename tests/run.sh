@@ -173,6 +173,13 @@ expect_eq "cherry-pick keeps the original author" \
 expect_eq "and no trailer credits the human for it" \
   "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "0"
 
+# A clean revert leaves no REVERT_HEAD behind -- the sequencer keeps that marker
+# only while it is stopped -- so the generated message is the only thing left to
+# recognise the replay by.
+( cd "$repo" && git revert --no-edit HEAD >/dev/null )
+expect_eq "no trailer on a clean revert" \
+  "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by:')" "0"
+
 # Reimplementing a contribution leaves no commit of theirs to preserve, so the
 # trailer is the only credit its author gets -- the hook clears the harness and
 # the identity's own redundant credit, and nothing else. The bot address is the
