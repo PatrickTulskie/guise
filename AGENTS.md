@@ -1,31 +1,31 @@
-# Working in agent-identity-framework
+# Working in guise
 
-`bin/agent-id` provisions a dedicated GitHub identity for coding harnesses, so
+`bin/guise` provisions a dedicated GitHub identity for coding harnesses, so
 agent commits land as the agent instead of impersonating the human. One bash
 script, one shell test harness, and docs someone else can self-serve from.
 
 Applies to Claude Code, Cursor, and any other AI coding tool; `CLAUDE.md` only
 imports this file.
 
-Rules from `~/agentic-code/AGENTS.md` (use `agent-gh`, no hand-written
+Rules from `~/agentic-code/AGENTS.md` (use `guise-gh`, no hand-written
 `Co-authored-by`, never touch git config or remotes) stack on top of this file
 and still apply. What follows is specific to this repo.
 
 ## Never test setup, uninstall, or rename against your real machine
 
-`setup` rewrites `~/.gitconfig`, writes `~/.config/agent-id/`, and installs into
+`setup` rewrites `~/.gitconfig`, writes `~/.config/guise/`, and installs into
 `~/.local/bin`. `uninstall` tears out the wiring for **every** identity at once
-and takes `~/.config/agent-id` with it — and it will happily do that to a real
+and takes `~/.config/guise` with it — and it will happily do that to a real
 identity that is currently in use.
 
 Exercise the tool through the test harness, which sandboxes `$HOME`. If you
 genuinely need a manual run, point it somewhere disposable first:
 
 ```bash
-HOME=$(mktemp -d) PATH="tests/stubs:$PATH" bin/agent-id setup --help
+HOME=$(mktemp -d) PATH="tests/stubs:$PATH" bin/guise setup --help
 ```
 
-Never run a bare `bin/agent-id setup`, `uninstall`, or `rename` to "see what
+Never run a bare `bin/guise setup`, `uninstall`, or `rename` to "see what
 happens". Ask instead.
 
 That rule is about developing on the tool, not about using it. When the human
@@ -37,9 +37,9 @@ you are on the machine they mean, too — `setup` writes to the `$HOME` of
 whatever host you happen to be running on, so from a cloud or container session
 you would file their PAT somewhere ephemeral and useless.
 
-`use` is harmless but a bare `agent-id use` is not for you: with no shell hook
+`use` is harmless but a bare `guise use` is not for you: with no shell hook
 loaded it replaces itself with an interactive shell, so the tool call never
-returns. `agent-id use <name> --emit-shell` only prints the `cd` and is safe.
+returns. `guise use <name> --emit-shell` only prints the `cd` and is safe.
 
 `uninstall` and `rename` stay off the table unless the human asks for that exact
 operation and you have read back what it does first. Neither will stop you:
@@ -78,11 +78,11 @@ byte-identical restore — not on "the command exited 0".
 
 ## The script is self-contained
 
-`agent-id-token`, `agent-id-credential`, `agent-gh`, the commit hook, the shell
-hook, and the git config template are **heredocs inside `bin/agent-id`**
+`guise-token`, `guise-credential`, `guise-gh`, the commit hook, the shell
+hook, and the git config template are **heredocs inside `bin/guise`**
 (`write_helper_*`, `write_hook`, `write_shell_hook`, `agent_conf_template`,
 `signing_*_block`). `setup` writes them into `~/.local/bin` and
-`~/.config/agent-id/`.
+`~/.config/guise/`.
 
 Editing an installed copy changes nothing that ships. Edit the heredoc.
 
@@ -122,7 +122,7 @@ The whole point of this tool is credential separation, so:
   `openssl dgst -sha256 -sign <(read_key) -binary` — never
   `-H "Authorization: ..."`.
 - Secrets live in 1Password, or on disk at mode 600 under
-  `~/.config/agent-id/keys/`. Never under the agent workspace: agents roam there
+  `~/.config/guise/keys/`. Never under the agent workspace: agents roam there
   and can commit what they read.
 - The one exception to "1Password by default" is a `--sign` identity's SSH
   signing key, which is generated locally and stays local. It grants nothing and
@@ -163,7 +163,7 @@ no time — and name the model and harness at the end.
 ## Layout
 
 ```text
-bin/agent-id             the entire tool: subcommands, checks, embedded helpers
+bin/guise                the entire tool: subcommands, checks, embedded helpers
 tests/run.sh             the whole suite, in a sandboxed $HOME
 tests/stubs/{op,curl,gh} the outside world
 docs/troubleshooting.md  keyed to real failure modes

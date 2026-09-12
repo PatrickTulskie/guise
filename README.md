@@ -1,4 +1,6 @@
-# agent-id
+# guise
+
+A dedicated GitHub identity for coding harnesses.
 
 ## For Humans
 
@@ -15,7 +17,7 @@ issued from it; that's the only part nobody can automate for you. After that it
 should be as simple as:
 
 ```bash
-./bin/agent-id setup --kind user --login your-agent-account
+./bin/guise setup --kind user --login your-agent-account
 ```
 
 `setup` prompts for the PAT — there is deliberately no `--token` flag, since
@@ -71,7 +73,7 @@ Apps → mode Always), or the first push will be rejected.
 ### Setup
 
 ```bash
-./bin/agent-id setup --owner patricktulskie --app-id 12345 --pem ~/Downloads/your-app.pem
+./bin/guise setup --owner patricktulskie --app-id 12345 --pem ~/Downloads/your-app.pem
 ```
 
 What happens: the App's metadata (slug, installation ID, bot user ID) is
@@ -80,7 +82,7 @@ helper binaries land in `~/.local/bin`, and a directory-scoped git identity is
 wired up for `~/agentic-code/patricktulskie-agent/` — named after the agent
 itself, not a generic slot. Setup also drops an `AGENTS.md` (and a
 `CLAUDE.md` importing it) into `~/agentic-code/` telling harnesses to use
-`agent-gh` — harnesses that stack context files up the directory tree pick it
+`guise-gh` — harnesses that stack context files up the directory tree pick it
 up for every repo underneath; it never overwrites your edits. It finishes by
 running `doctor`, which verifies the whole chain. Safe to re-run any time.
 
@@ -92,7 +94,7 @@ unless you use `--store file`.
 By default the secret — an App's private key, or an account's PAT — lives in
 1Password and is read on demand, which means a locked vault blocks the agent.
 For agents that run unattended, pass `--store file` and it is kept under
-`~/.config/agent-id/keys/` (mode 600) instead — no 1Password involved at use
+`~/.config/guise/keys/` (mode 600) instead — no 1Password involved at use
 time. It deliberately does *not* live in `~/agentic-code/`: agents roam that
 directory and must not be able to read or accidentally commit it.
 
@@ -138,7 +140,7 @@ Then hand the token to setup as a file, never as a flag value (flags land in
 
 ```bash
 pbpaste > /tmp/pat
-./bin/agent-id setup --kind user --token-file /tmp/pat
+./bin/guise setup --kind user --token-file /tmp/pat
 ```
 
 Setup calls `GET /user` to discover the account's login and numeric user ID,
@@ -177,10 +179,10 @@ Repos and orgs increasingly require signed commits. A separate GitHub account is
 a real account, so it can hold a signing key of its own:
 
 ```bash
-agent-id setup --kind user --login your-agent-account --sign
+guise setup --kind user --login your-agent-account --sign
 ```
 
-That generates an ed25519 key at `~/.config/agent-id/keys/<identity>.signing`
+That generates an ed25519 key at `~/.config/guise/keys/<identity>.signing`
 (mode 600, no passphrase, never leaves the machine), switches the scoped config
 to `gpg.format = ssh` with `commit.gpgsign = true`, writes an allowed-signers
 file so `git log --show-signature` verifies locally, and prints the public half.
@@ -196,7 +198,7 @@ says so.
 Registering a signing key needs an account-level permission that a fine-grained
 PAT cannot carry, so there is no credential that could do it for you. That also
 means the whole signing path touches no secret at all: the one GitHub call
-`agent-id` makes here is an unauthenticated read of the account's public key
+`guise` makes here is an unauthenticated read of the account's public key
 list, to check whether the key is already up there.
 
 The key itself is deliberately the one thing not kept in 1Password. It grants
@@ -211,8 +213,8 @@ still in place reuses it, which is what you want, since the old public half is
 the one registered on the account:
 
 ```bash
-rm ~/.config/agent-id/keys/<identity>.signing*
-agent-id setup --kind user --login your-agent-account --sign
+rm ~/.config/guise/keys/<identity>.signing*
+guise setup --kind user --login your-agent-account --sign
 ```
 
 `--no-sign` turns it back off, shreds the local private half, and reminds you to
@@ -227,47 +229,47 @@ ruleset's bypass list instead; see
 ## Daily use
 
 ```bash
-agent-id use patricktulskie-agent         # cd ~/agentic-code/patricktulskie-agent
-agent-id clone patricktulskie/some-repo   # → ~/agentic-code/patricktulskie-agent/
+guise use patricktulskie-agent         # cd ~/agentic-code/patricktulskie-agent
+guise clone patricktulskie/some-repo   # → ~/agentic-code/patricktulskie-agent/
 cd some-repo
 # ... let the agent work; commits are authored by the bot, co-authored by you
-agent-gh pr create --fill                 # opens the PR as the bot
+guise-gh pr create --fill                 # opens the PR as the bot
 ```
 
-`agent-id use` with no name goes to your default identity — the one
-`agent-id default` prints.
+`guise use` with no name goes to your default identity — the one
+`guise default` prints.
 
 It moves the shell you're already in, which needs a small shell function that
-`setup` installs to `~/.config/agent-id/hook.sh` and sources from your `~/.zshrc`
-(or `~/.bash_profile`) between `# >>> agent-id >>>` markers. **It takes effect in
+`setup` installs to `~/.config/guise/hook.sh` and sources from your `~/.zshrc`
+(or `~/.bash_profile`) between `# >>> guise >>>` markers. **It takes effect in
 new shells** — right after setup, either open one or `source ~/.zshrc`. Until
 then, and in any shell that doesn't load the hook, `use` opens a subshell in the
 directory instead and you leave it with `exit`.
 
 Nothing is exported. The directory is what carries the identity — git picks it
-up through `includeIf`, `agent-gh` by reading `$PWD` — so there's no stale
+up through `includeIf`, `guise-gh` by reading `$PWD` — so there's no stale
 variable to follow you back out of the tree. `uninstall` removes the rc lines and
 the hook.
 
 The only convention that matters: **agent clones live under `~/agentic-code/`,
 your own clones live anywhere else.** Inside that directory every git operation
 — from Claude Code, Cursor, or a plain terminal — uses the bot identity with no
-harness-specific configuration. Tell each harness one thing: use `agent-gh`
+harness-specific configuration. Tell each harness one thing: use `guise-gh`
 instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `agent-id setup` | provision an identity (idempotent) |
-| `agent-id doctor` | verify everything; non-zero exit on any failure |
-| `agent-id clone <owner/repo>` | clone where the identity applies |
-| `agent-id use [name]` | cd to an identity's directory; the default one if you don't say |
-| `agent-id update` | reinstall helpers, hook, and rendered confs from this copy of the script |
-| `agent-id token` | print the identity's token (debugging / harness use) |
-| `agent-id default [name]` | show or change the identity used when none is named |
-| `agent-id rename <old> <new>` | rename an identity, its directory, and its key files |
-| `agent-id uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
+| `guise setup` | provision an identity (idempotent) |
+| `guise doctor` | verify everything; non-zero exit on any failure |
+| `guise clone <owner/repo>` | clone where the identity applies |
+| `guise use [name]` | cd to an identity's directory; the default one if you don't say |
+| `guise update` | reinstall helpers, hook, and rendered confs from this copy of the script |
+| `guise token` | print the identity's token (debugging / harness use) |
+| `guise default [name]` | show or change the identity used when none is named |
+| `guise rename <old> <new>` | rename an identity, its directory, and its key files |
+| `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
 
 ## Identity names and the default
 
@@ -276,16 +278,16 @@ the account login for an account — and that name is the directory name, so
 clones land in `~/agentic-code/patricktulskie-agent/`. Pass `--name` to
 override.
 
-`agent-id clone` and `agent-gh` take the identity from the directory you're
+`guise clone` and `guise-gh` take the identity from the directory you're
 standing in, so inside `~/agentic-code/someorg/` you get `someorg` without
 saying so. Outside the base directory — and for commands with no directory to
-read, like `agent-id token` — they fall back to the default, recorded in
-`~/.config/agent-id/config` as `core.defaultidentity` and set to the first
+read, like `guise token` — they fall back to the default, recorded in
+`~/.config/guise/config` as `core.defaultidentity` and set to the first
 identity you provision:
 
 ```bash
-agent-id default                        # print it
-agent-id default patricktulskie-agent   # change it
+guise default                        # print it
+guise default patricktulskie-agent   # change it
 ```
 
 `setup --default` claims it at provisioning time instead, for when you already
@@ -296,7 +298,7 @@ rendered git conf, and the directory with your clones in it. Existing installs
 made before this behavior are the reason it exists:
 
 ```bash
-agent-id rename default patricktulskie-agent
+guise rename default patricktulskie-agent
 ```
 
 ## Multiple identities
@@ -305,8 +307,8 @@ Each identity gets its own subdirectory. A second installation of the *same*
 app (e.g. on an org you belong to) needs no new key:
 
 ```bash
-agent-id setup --owner some-org --app-id 12345 --name someorg
-agent-id clone some-org/their-repo --name someorg   # → ~/agentic-code/someorg/
+guise setup --owner some-org --app-id 12345 --name someorg
+guise clone some-org/their-repo --name someorg   # → ~/agentic-code/someorg/
 ```
 
 `--name` is only needed from outside; run the same clone from inside
@@ -315,31 +317,31 @@ agent-id clone some-org/their-repo --name someorg   # → ~/agentic-code/someorg
 A different app entirely gets its own `--pem`:
 
 ```bash
-agent-id setup --owner patricktulskie --app-id 67890 --pem ~/Downloads/other.pem --name experiments
+guise setup --owner patricktulskie --app-id 67890 --pem ~/Downloads/other.pem --name experiments
 ```
 
 Kinds mix freely — an app bot in one subdirectory, an account in another:
 
 ```bash
-agent-id setup --kind user --token-file /tmp/pat --name oss
-agent-id clone someone/their-repo --name oss     # → ~/agentic-code/oss/
+guise setup --kind user --token-file /tmp/pat --name oss
+guise clone someone/their-repo --name oss     # → ~/agentic-code/oss/
 ```
 
 ## Picking up a new version
 
 The helper binaries, the commit hook, and the git config template live inside
-`bin/agent-id` and are written out at install time, so a newer script in this
+`bin/guise` and are written out at install time, so a newer script in this
 repo does nothing until you install it:
 
 ```bash
-git pull && ./bin/agent-id update
+git pull && ./bin/guise update
 ```
 
 `update` rewrites the helpers, the hook, and **every** identity's rendered conf
 from the script you ran it with. It reads no credential, makes no API call, and
-does not touch `~/.config/agent-id/config` or anything stored in 1Password — so
+does not touch `~/.config/guise/config` or anything stored in 1Password — so
 it works with the vault locked and the network down. Follow it with
-`agent-id doctor` when you want the whole chain verified.
+`guise doctor` when you want the whole chain verified.
 
 Re-running `setup` also picks up a new version, but it does more than an update
 needs: it reads the identity's stored secret and calls GitHub to rediscover
@@ -361,5 +363,5 @@ source work that means one of:
 
 ## When something's off
 
-Run `agent-id doctor` first — every check prints a remediation hint. Then see
+Run `guise doctor` first — every check prints a remediation hint. Then see
 [docs/troubleshooting.md](docs/troubleshooting.md).

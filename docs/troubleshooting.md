@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Run `agent-id doctor` first — it covers most of these and prints a hint per
+Run `guise doctor` first — it covers most of these and prints a hint per
 failing check. This page is keyed to the failure modes people actually hit.
 
 ## Commits or pushes land as *you*, not the bot
@@ -11,7 +11,7 @@ lookup, or the repo isn't inside the agent directory at all.
 - Check the repo location: identity only applies under `~/agentic-code/<identity>/`.
   `git config user.email` inside the repo should print the bot address.
 - Check the helper chain: the rendered conf
-  (`~/.config/agent-id/git/<identity>.conf`) must contain an **empty**
+  (`~/.config/guise/git/<identity>.conf`) must contain an **empty**
   `helper =` line before the real one — that empty line clears inherited
   helpers. Verify with:
   ```bash
@@ -33,7 +33,7 @@ ID**. They are different numbers; the email must be
 the equivalent is `<userId>+<login>@users.noreply.github.com`, where the
 numeric user ID comes from `GET /user`.
 
-Re-run `agent-id setup` — it rediscovers the bot user ID from
+Re-run `guise setup` — it rediscovers the bot user ID from
 `GET /users/<slug>%5Bbot%5D` and re-renders the conf. `doctor` has a dedicated
 check for this ("app id != bot user id").
 
@@ -52,7 +52,7 @@ whose work you reimplemented survives. It is written out at install time, so a
 newer script does nothing on its own:
 
 ```bash
-git pull && ./bin/agent-id update
+git pull && ./bin/guise update
 ```
 
 `doctor`'s "co-author hook installed and executable" check proves a hook is
@@ -70,7 +70,7 @@ The current hook stands down on a replay: a cherry-pick, a revert, a rebase, or
 a `--author` that isn't the identity's own address. Update to get it:
 
 ```bash
-git pull && ./bin/agent-id update
+git pull && ./bin/guise update
 ```
 
 Credit that a replayed commit already carries is left as it is — the hook only
@@ -84,7 +84,7 @@ signing.
 For a **separate GitHub account**, give it a key of its own:
 
 ```bash
-agent-id setup --kind user --login <agent-login> --sign
+guise setup --kind user --login <agent-login> --sign
 ```
 
 That generates an SSH signing key, switches the scoped config to
@@ -111,9 +111,9 @@ fails. Only the second one involves GitHub.
 Signed in **as the agent account**, go to github.com/settings/ssh/new, set
 **Key type: Signing Key** — not Authentication Key; they are separate lists, and
 an authentication key verifies nothing — and paste
-`~/.config/agent-id/keys/<identity>.signing.pub`. This step is always manual:
+`~/.config/guise/keys/<identity>.signing.pub`. This step is always manual:
 registering a signing key needs an account-level permission that a fine-grained
-PAT cannot carry. Re-running `agent-id setup --sign` prints the key again if you
+PAT cannot carry. Re-running `guise setup --sign` prints the key again if you
 need it.
 
 GitHub also matches the signature against the account owning the commit email,
@@ -129,7 +129,7 @@ account and re-run setup for that identity:
 
 ```bash
 pbpaste > /tmp/pat
-agent-id setup --kind user --name <identity> --token-file /tmp/pat
+guise setup --kind user --name <identity> --token-file /tmp/pat
 ```
 
 The git wiring and the identity's directory are untouched; only the stored
@@ -167,7 +167,7 @@ To check what a credential reaches without waiting for a clone (the token goes
 through a config file on a pipe, never `-H`, so it stays out of `ps`):
 
 ```bash
-curl -s --config <(printf 'header = "Authorization: Bearer %s"\n' "$(agent-id token <identity>)") \
+curl -s --config <(printf 'header = "Authorization: Bearer %s"\n' "$(guise token <identity>)") \
   "https://api.github.com/user/repos?per_page=1"
 ```
 
@@ -184,7 +184,7 @@ account (a separate browser profile is the least painful way) and issue the
 token there.
 
 If you're setting this up on a machine where `gh` isn't logged in, setup can't
-run that comparison and warns instead of refusing. Check `agent-id doctor`
+run that comparison and warns instead of refusing. Check `guise doctor`
 once `gh` is authenticated.
 
 ## Token expired mid-session
@@ -195,10 +195,10 @@ that only expires on the date GitHub stamped on it (see above).
 Installation tokens live 1 hour. The credential helper mints on demand and
 caches for 55 minutes, so a long session should never see an expired token —
 git asks the helper on every push. If you exported a token into the
-environment (e.g. `GH_TOKEN=$(agent-id token)`), that copy *will* expire;
-use `agent-gh`, which mints fresh per invocation, instead of exporting.
+environment (e.g. `GH_TOKEN=$(guise token)`), that copy *will* expire;
+use `guise-gh`, which mints fresh per invocation, instead of exporting.
 
-If minting itself fails: `agent-id token` prints the error. Usual causes are
+If minting itself fails: `guise token` prints the error. Usual causes are
 1Password locked (`op signin`; doesn't apply to `--store file` identities),
 the app uninstalled, or a rotated private key (re-run `setup --pem` with the
 new download).
@@ -209,40 +209,40 @@ new download).
 `includeIf "gitdir:..."`, not environment variables — deliberately, because
 Cursor's agent subprocesses don't reliably inherit exported env.
 
-Move (or re-clone with `agent-id clone`) the repo into
+Move (or re-clone with `guise clone`) the repo into
 `~/agentic-code/<identity>/`. No harness configuration exists to set; location
 is the mechanism.
 
-## `agent-id use` opens a subshell instead of moving the one you're in
+## `guise use` opens a subshell instead of moving the one you're in
 
 **Cause:** the shell hook isn't loaded. `setup` writes it to
-`~/.config/agent-id/hook.sh` and sources it from your rc, but a shell that was
+`~/.config/guise/hook.sh` and sources it from your rc, but a shell that was
 already running never read that line.
 
-Open a new shell, or `source ~/.zshrc`. `agent-id doctor` reports this as a
+Open a new shell, or `source ~/.zshrc`. `guise doctor` reports this as a
 `warn`, not a failure — the identity chain works either way, and the subshell
 (which you leave with `exit`) is the deliberate fallback.
 
 If it still doesn't take:
 
-- `grep agent-id ~/.zshrc` should show the sourced line between
-  `# >>> agent-id >>>` markers. Setup only edits the rc for zsh and bash; under
+- `grep guise ~/.zshrc` should show the sourced line between
+  `# >>> guise >>>` markers. Setup only edits the rc for zsh and bash; under
   any other shell it prints the line for you to add yourself.
 - On macOS, bash reads `~/.bash_profile` rather than `~/.bashrc`, which is where
   setup puts it.
-- `command agent-id` must resolve — the hook defines a function that shadows
-  `agent-id` and delegates to the real script, so `~/.local/bin` has to be on
+- `command guise` must resolve — the hook defines a function that shadows
+  `guise` and delegates to the real script, so `~/.local/bin` has to be on
   `PATH`.
 
-## Setup or uninstall stops: "has a stray agent-id marker"
+## Setup or uninstall stops: "has a stray guise marker"
 
 `setup` keeps its lines in `~/.gitconfig` and your shell rc between
-`# >>> agent-id >>>` and `# <<< agent-id <<<`, and finds them again by those
+`# >>> guise >>>` and `# <<< guise <<<`, and finds them again by those
 markers. If a file has an unpaired marker, two blocks, or one out of order,
 there is no single block to replace and no safe way to guess which lines are
 yours — so the command stops and changes nothing.
 
-`grep -n 'agent-id >>>\|agent-id <<<' ~/.gitconfig ~/.zshrc` shows what is
+`grep -n 'guise >>>\|guise <<<' ~/.gitconfig ~/.zshrc` shows what is
 there. Usually it is an orphan left by a hand edit that deleted half a block, or
 a config merged from two machines. Delete the stray markers and the lines
 between them, leaving either one complete pair or none, then re-run.
@@ -252,8 +252,8 @@ guess here would take out lines you wrote.
 
 ## `gh` commands act as you, not the bot
 
-Plain `gh` uses your stored login. Use `agent-gh` — it injects a bot token via
-`GH_TOKEN`, which `gh` prefers over its own credentials. Put "use `agent-gh`
+Plain `gh` uses your stored login. Use `guise-gh` — it injects a bot token via
+`GH_TOKEN`, which `gh` prefers over its own credentials. Put "use `guise-gh`
 instead of `gh`" in `CLAUDE.md` and Cursor rules.
 
 ## Your own commits broke (signing errors, wrong email)
@@ -263,11 +263,11 @@ agent directory, and `~/.gitconfig` only gains a marker-delimited include
 block. If your own commits changed behavior:
 
 - `git config --show-origin user.email` in one of *your* repos: the origin
-  should be your global config, not anything under `~/.config/agent-id/`.
+  should be your global config, not anything under `~/.config/guise/`.
 - Same for `commit.gpgsign` and `gpg.format`: a `--sign` identity sets both, but
   only inside `~/agentic-code/<identity>/`.
-- `agent-id doctor` runs a "human identity untouched" check.
-- Worst case `agent-id uninstall` removes every trace of the wiring.
+- `guise doctor` runs a "human identity untouched" check.
+- Worst case `guise uninstall` removes every trace of the wiring.
 
 ## CI didn't run on the agent's PR
 
