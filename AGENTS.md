@@ -37,6 +37,12 @@ you are on the machine they mean, too — `setup` writes to the `$HOME` of
 whatever host you happen to be running on, so from a cloud or container session
 you would file their PAT somewhere ephemeral and useless.
 
+Pass the flags; don't reach for the wizard. A bare `setup` asks for its answers
+only when stdin is a terminal, which yours is not, so it will refuse on a
+missing flag the way it always has — and `--wizard` in a tool call would block
+on the first prompt. The guided path is there for the human to run themselves,
+and offering them that instead is a fine answer when the flags aren't settled.
+
 `use` is harmless but a bare `guise use` is not for you: with no shell hook
 loaded it replaces itself with an interactive shell, so the tool call never
 returns. `guise use <name> --emit-shell` only prints the `cd` and is safe.
