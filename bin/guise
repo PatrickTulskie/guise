@@ -1839,16 +1839,41 @@ cmd_basedir() {
   # halfway through would leave the workspace split across two roots. Tab
   # separates the pair -- an identity name is [A-Za-z0-9_-]+, so it cannot
   # carry one, and a path that does still round-trips.
-  local moves="" src dst
+  local newroot moves="" src dst other
+  if [[ -n "$clear" ]]; then newroot=$(basedir); else newroot="$path"; fi
   for n in $targets; do
     src=$(identity_dir "$n")
-    if [[ -n "$clear" ]]; then dst="$(basedir)/$n"; else dst="$path/$n"; fi
+    dst="$newroot/$n"
     [[ "$src" != "$dst" ]] || continue
     [[ ! -e "$dst" ]] || die "$dst already exists -- move it aside first (nothing changed)"
     [[ -d "$src" || ! -e "$src" ]] || die "$src is not a directory (nothing changed)"
     moves="$moves$src	$dst
 "
   done
+
+  # Two ways a plan eats itself, both of which strand half the workspace under
+  # the wrong identity while the config still says the old thing. Neither is
+  # visible one move at a time, so the whole plan is checked before any of it
+  # runs -- there is nothing to roll back to once an mv has happened.
+  while IFS="	" read -r src dst; do
+    [[ -n "$src" ]] || continue
+    # The new root inside a directory that is itself leaving: the first move
+    # lands under a tree the next one then tries to move into itself.
+    case "$newroot/" in
+      "$src"/*) die "the new workspace is inside $src, which is moving too -- pick a path outside every identity directory (nothing changed)" ;;
+    esac
+    # An identity that is staying put but lives inside one that is leaving: its
+    # clones would ride along and fall out of its own scope.
+    for other in $(list_identities); do
+      dst=$(identity_dir "$other")
+      [[ "$dst" != "$src" ]] || continue
+      case "$dst/" in
+        "$src"/*) die "identity '$other' sits inside $src, which is moving -- move '$other' out first (nothing changed)" ;;
+      esac
+    done
+  done <<EOF
+$moves
+EOF
 
   while IFS="	" read -r src dst; do
     [[ -n "$src" && -d "$src" ]] || continue
