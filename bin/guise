@@ -14,6 +14,8 @@ set -euo pipefail
 
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
+VERSION="0.1.0"
+
 CONFIG_DIR="$HOME/.config/guise"
 # The embedded helpers have always read GUISE_CONFIG, and `guise which` now
 # answers guise-gh's "whose directory is this?" -- so it has to resolve against
@@ -2432,7 +2434,7 @@ cmd_rename() {
 
 usage() {
   cat <<EOF
-guise -- a dedicated GitHub identity for coding harnesses
+guise $VERSION -- a dedicated GitHub identity for coding harnesses
 
 usage: guise <command> [flags]
 
@@ -2482,6 +2484,7 @@ usage: guise <command> [flags]
              without <path>: print it; --name: just that identity's, which
              overrides the shared one; --unset: drop an override
   which      print the identity owning the current directory
+  version    print the version of this copy of the script
 EOF
 }
 
@@ -2497,6 +2500,7 @@ case "${1:-}" in
   rename)    shift; cmd_rename "$@" ;;
   basedir)   shift; cmd_basedir "$@" ;;
   which)     shift; cmd_which "$@" ;;
+  version|--version|-v) say "guise $VERSION" ;;
   help|--help|-h|"") usage ;;
   *) usage >&2; die "unknown command '${1}'" ;;
 esac
