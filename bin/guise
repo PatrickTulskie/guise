@@ -56,6 +56,26 @@ shred_file() {
 # fallback would concatenate garbage onto the real answer on Linux.
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 
+# Resolve a path through symlinks as far as it exists, keeping whatever tail
+# does not exist yet. `cd` + `pwd -P` is the portable resolver: macOS has no
+# GNU `readlink -f`, and `realpath -m` is not everywhere either. Comparing
+# paths lexically is what lets a symlinked root look like it sits outside a
+# tree it is really inside.
+canonical_path() { # path -> resolved path (falls back to the input)
+  local p="$1" tail="" base real
+  while [[ ! -d "$p" ]]; do
+    base="${p##*/}"
+    [[ -n "$base" ]] || break
+    tail="/$base$tail"
+    p="${p%/*}"
+    [[ -n "$p" ]] || { p="/"; break; }
+  done
+  real=$(CDPATH= cd "$p" 2>/dev/null && pwd -P) || real=""
+  [[ -n "$real" ]] || { printf '%s' "$1"; return 0; }
+  [[ "$real" != "/" || -z "$tail" ]] || { printf '%s' "$tail"; return 0; }
+  printf '%s%s' "$real" "$tail"
+}
+
 # ~-form for values written into git config files
 display_path() {
   case "$1" in
@@ -1842,7 +1862,7 @@ cmd_basedir() {
   # halfway through would leave the workspace split across two roots. Tab
   # separates the pair -- an identity name is [A-Za-z0-9_-]+, so it cannot
   # carry one, and a path that does still round-trips.
-  local newroot moves="" src dst other
+  local newroot moves="" src dst other cnewroot csrc
   if [[ -n "$clear" ]]; then newroot=$(basedir); else newroot="$path"; fi
   for n in $targets; do
     src=$(identity_dir "$n")
@@ -1858,20 +1878,25 @@ cmd_basedir() {
   # the wrong identity while the config still says the old thing. Neither is
   # visible one move at a time, so the whole plan is checked before any of it
   # runs -- there is nothing to roll back to once an mv has happened.
+  # Resolved, not compared as typed: a symlinked root points inside a tree it
+  # does not lexically sit in, and `mv` follows the link while a string compare
+  # does not.
+  cnewroot=$(canonical_path "$newroot")
   while IFS="	" read -r src dst; do
     [[ -n "$src" ]] || continue
+    csrc=$(canonical_path "$src")
     # The new root inside a directory that is itself leaving: the first move
     # lands under a tree the next one then tries to move into itself.
-    case "$newroot/" in
-      "$src"/*) die "the new workspace is inside $src, which is moving too -- pick a path outside every identity directory (nothing changed)" ;;
+    case "$cnewroot/" in
+      "$csrc"/*) die "the new workspace resolves inside $src, which is moving too -- pick a path outside every identity directory (nothing changed)" ;;
     esac
     # An identity that is staying put but lives inside one that is leaving: its
     # clones would ride along and fall out of its own scope.
     for other in $(list_identities); do
-      dst=$(identity_dir "$other")
-      [[ "$dst" != "$src" ]] || continue
+      dst=$(canonical_path "$(identity_dir "$other")")
+      [[ "$dst" != "$csrc" ]] || continue
       case "$dst/" in
-        "$src"/*) die "identity '$other' sits inside $src, which is moving -- move '$other' out first (nothing changed)" ;;
+        "$csrc"/*) die "identity '$other' sits inside $src, which is moving -- move '$other' out first (nothing changed)" ;;
       esac
     done
   done <<EOF
