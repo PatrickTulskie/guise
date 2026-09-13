@@ -479,6 +479,14 @@ expect_fail "basedir refuses a symlinked root that resolves into a moving identi
   agent basedir "$HOME/zlink"
 expect "and still moves nothing" test -d "$HOME/src/$APP_IDENT/someclone"
 expect "including through the link" test -d "$HOME/src/zeta/zclone"
+# And the same overlap spelled with . and .. in a part of the path that does not
+# exist yet, which no amount of resolving the existing prefix would catch.
+expect_fail "basedir refuses an overlap reached through .." \
+  agent basedir "$HOME/src/missing/../zeta"
+expect_fail "basedir refuses an overlap reached through ." \
+  agent basedir "$HOME/src/./zeta"
+expect "and neither spelling moved anything" test -d "$HOME/src/$APP_IDENT/someclone"
+
 # A symlinked root that resolves somewhere harmless is still a fine answer --
 # the check must reject the overlap, not the symlink.
 mkdir -p "$SB/realroot"
