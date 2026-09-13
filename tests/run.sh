@@ -459,6 +459,28 @@ agent doctor >/dev/null 2>&1
 expect_eq "and doctor passes" "$?" "0"
 agent basedir "$HOME/src" >/dev/null 2>&1
 
+# A destination that sits inside a directory the same plan is moving: the first
+# mv would succeed and the second land a tree inside itself, stranding the first
+# identity under the second's scope with the config still saying the old thing.
+# Nothing may move at all.
+openssl genrsa -out "$SB/keyz.pem" 2048 2>/dev/null
+run_setup --store file --name zeta --pem "$SB/keyz.pem" >/dev/null 2>&1
+git init -q "$HOME/src/zeta/zclone"
+expect_fail "basedir refuses a new root inside an identity that is also moving" \
+  agent basedir "$HOME/src/zeta"
+expect "and moves nothing when it refuses" test -d "$HOME/src/$APP_IDENT/someclone"
+expect "including the identity the path named" test -d "$HOME/src/zeta/zclone"
+expect_eq "with the setting untouched" "$(cfg core.basedir)" "$HOME/src"
+
+# An identity staying put because it has its own workspace, but living inside
+# one that is leaving: its clones would ride along out of their own scope.
+agent basedir "$HOME/src/$APP_IDENT/nested" --name zeta >/dev/null 2>&1
+expect "the nested identity moved" test -d "$HOME/src/$APP_IDENT/nested/zeta/zclone"
+expect_fail "basedir refuses to move a directory another identity lives inside" \
+  agent basedir "$HOME/faraway"
+expect "leaving both where they were" test -d "$HOME/src/$APP_IDENT/nested/zeta/zclone"
+agent basedir --unset --name zeta >/dev/null 2>&1
+
 expect_fail "basedir refuses a relative path" agent basedir relative/path
 mkdir -p "$HOME/occupied/$APP_IDENT"
 expect_fail "basedir refuses an occupied destination" agent basedir "$HOME/occupied"
