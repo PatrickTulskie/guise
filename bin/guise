@@ -56,24 +56,40 @@ shred_file() {
 # fallback would concatenate garbage onto the real answer on Linux.
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 
-# Resolve a path through symlinks as far as it exists, keeping whatever tail
-# does not exist yet. `cd` + `pwd -P` is the portable resolver: macOS has no
-# GNU `readlink -f`, and `realpath -m` is not everywhere either. Comparing
-# paths lexically is what lets a symlinked root look like it sits outside a
-# tree it is really inside.
-canonical_path() { # path -> resolved path (falls back to the input)
-  local p="$1" tail="" base real
-  while [[ ! -d "$p" ]]; do
-    base="${p##*/}"
-    [[ -n "$base" ]] || break
-    tail="/$base$tail"
-    p="${p%/*}"
-    [[ -n "$p" ]] || { p="/"; break; }
+# Resolve a path for comparison: symlinks followed, "." and ".." folded, and a
+# tail that does not exist yet carried along. Comparing paths as typed is what
+# lets a root sitting inside a tree look like it sits outside one.
+#
+# Component by component, resolving after each step rather than resolving a
+# prefix and appending the rest. That ordering is the point: ".." has to be
+# applied to what the path before it actually resolved to, or a symlink (or a
+# missing directory) earlier in the path changes what it means. `cd` + `pwd -P`
+# is the portable resolver -- macOS has no GNU `readlink -f`, and `realpath -m`
+# is not everywhere either.
+canonical_path() { # path -> resolved path
+  local rest="$1" out comp real
+  case "$rest" in
+    /*) out="" ;;
+    *)  out="$PWD" ;;
+  esac
+  while [[ -n "$rest" ]]; do
+    rest="${rest#/}"
+    comp="${rest%%/*}"
+    if [[ "$comp" == "$rest" ]]; then rest=""; else rest="/${rest#*/}"; fi
+    case "$comp" in
+      ""|.) continue ;;
+      # Popping an empty $out leaves it empty, which is "/" -- the same place
+      # ".." above the root lands.
+      ..)   out="${out%/*}" ;;
+      *)    out="$out/$comp" ;;
+    esac
+    if [[ -d "$out" ]]; then
+      real=$(CDPATH= cd "$out" 2>/dev/null && pwd -P) || real=""
+      [[ -z "$real" ]] || out="$real"
+    fi
   done
-  real=$(CDPATH= cd "$p" 2>/dev/null && pwd -P) || real=""
-  [[ -n "$real" ]] || { printf '%s' "$1"; return 0; }
-  [[ "$real" != "/" || -z "$tail" ]] || { printf '%s' "$tail"; return 0; }
-  printf '%s%s' "$real" "$tail"
+  [[ -n "$out" ]] || out="/"
+  printf '%s' "$out"
 }
 
 # ~-form for values written into git config files
