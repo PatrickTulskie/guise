@@ -1120,6 +1120,17 @@ expect_eq "without asking for the owner and App ID again" "$(snapshot)" "$snap_a
 expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1111"
 
 
+# Entering the human's own account is a local mistake like any other, so the
+# wizard asks again instead of ending the run.
+new_sandbox
+export FAKE_GH_LOGIN=PatrickTulskie
+printf 'y\nuser\ny\nPatrickTulskie\npatrick-agent\ny\nok\ngithub_pat_wiz\nn\nfile\n\n\ny\n' \
+  | wizard >/dev/null 2>&1
+expect_eq "answering the human's own login is re-asked, not fatal" "$?" "0"
+expect_eq "and the agent account is what got set up" \
+  "$(cfg identity.$USER_IDENT.login)" "patrick-agent"
+unset FAKE_GH_LOGIN
+
 # --wizard alongside flags asks only for what the flags did not answer, so the
 # two ways of driving setup compose instead of one overriding the other.
 new_sandbox
