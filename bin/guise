@@ -1087,9 +1087,17 @@ wizard_setup() {
       wz_require repair "which one" "$(default_identity)"
       identity_exists "$repair" || die "identity '$repair' not in config"
       # Every other answer is already in the config, and a bare re-run is the
-      # advertised repair action, so there is nothing left to ask.
+      # advertised repair action, so there is nothing left to ask -- but the
+      # answers still have to be handed over, or cmd_setup asks for the ones it
+      # needs and a piped wizard dies on the first of them.
       name="$repair"
       kind=$(identity_kind "$repair")
+      if [[ "$kind" == "app" ]]; then
+        owner=$(cfg_get "identity.$repair.owner" || true)
+        app_id=$(cfg_get "identity.$repair.appid" || true)
+      else
+        login=$(cfg_get "identity.$repair.login" || true)
+      fi
       say ""
       say "re-running for '$repair' with its stored settings"
       return 0
