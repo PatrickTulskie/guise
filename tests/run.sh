@@ -551,6 +551,22 @@ expect_eq "and the default from outside the workspace" \
 agent basedir "$HOME/elsewhere" --name agent-two >/dev/null 2>&1
 expect_eq "and follows an identity to its own workspace" \
   "$(gh_token_in "$HOME/elsewhere/agent-two")" "github_pat_two"
+# The helpers have always read GUISE_CONFIG. guise-gh now resolves the identity
+# through `guise which`, so guise itself has to read the same config -- or the
+# two disagree and gh runs as whoever the home config calls the default.
+cp "$HOME/.config/guise/config" "$SB/alt-config"
+git config -f "$SB/alt-config" core.basedir "$HOME/altroot"
+# agent-two picked up a workspace of its own above; in this config it follows
+# the shared root, which is what makes the two configs disagree about the path.
+git config -f "$SB/alt-config" --unset identity.agent-two.basedir
+mkdir -p "$HOME/altroot/agent-two"
+expect_eq "guise-gh resolves against GUISE_CONFIG, not the home config" \
+  "$(cd "$HOME/altroot/agent-two" && GUISE_CONFIG="$SB/alt-config" \
+      "$HOME/.local/bin/guise-gh" echo-token)" "github_pat_two"
+expect_eq "and guise which answers from it too" \
+  "$(cd "$HOME/altroot/agent-two" && GUISE_CONFIG="$SB/alt-config" \
+      "$ROOT/bin/guise" which)" "agent-two"
+
 expect_eq "GUISE_IDENTITY still overrides the directory" \
   "$(cd "$HOME/agentic-code/agent-one" && GUISE_IDENTITY=agent-two "$HOME/.local/bin/guise-gh" echo-token)" \
   "github_pat_two"
