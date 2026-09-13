@@ -1008,6 +1008,19 @@ expect "uninstall leaves the signing key alone" \
 expect "and names the public half still on the account" \
   grep -q 'public signing key on the agent account' "$SB/uninstall.out"
 
+# --- help is inert --------------------------------------------------------------
+# The usage text is an unquoted heredoc, so anything expandable in it runs when
+# help does -- a backtick once turned `guise help` into a `guise setup`. Nothing
+# on stderr is the cheap way to hold that line whatever gets added to the text.
+echo "help:"
+new_sandbox
+help_err=$("$ROOT/bin/guise" help 2>&1 >/dev/null </dev/null)
+expect_eq "help writes nothing to stderr" "$help_err" ""
+expect_eq "help exits 0" "$?" "0"
+expect "help still lists the commands" \
+  bash -c "'$ROOT/bin/guise' help 2>/dev/null | grep -q '^  setup'"
+expect "and help provisions nothing" test ! -e "$HOME/.config/guise/config"
+
 # --- guided setup --------------------------------------------------------------
 # The wizard reads its answers from stdin whether or not that is a terminal, so
 # the suite walks the same prompts a human does. Answers are positional, and
@@ -1095,6 +1108,7 @@ snap_guided=$(snapshot)
 printf 'y\ny\n%s\n' "$USER_IDENT" | wizard >/dev/null 2>&1
 expect_eq "re-running an existing identity through the wizard exits 0" "$?" "0"
 expect_eq "and changes nothing" "$(snapshot)" "$snap_guided"
+
 
 # --wizard alongside flags asks only for what the flags did not answer, so the
 # two ways of driving setup compose instead of one overriding the other.
