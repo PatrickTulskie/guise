@@ -911,6 +911,16 @@ printf 'y\ny\n%s\n' "$USER_IDENT" | wizard >/dev/null 2>&1
 expect_eq "re-running an existing identity through the wizard exits 0" "$?" "0"
 expect_eq "and changes nothing" "$(snapshot)" "$snap_guided"
 
+# The same re-run, but for an app identity -- whose owner and App ID cmd_setup
+# needs and the config already holds.
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+snap_app=$(snapshot)
+printf 'y\ny\n%s\n' "$APP_IDENT" | wizard >/dev/null 2>&1
+expect_eq "re-running an app identity through the wizard exits 0" "$?" "0"
+expect_eq "without asking for the owner and App ID again" "$(snapshot)" "$snap_app"
+expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1111"
+
 
 # --wizard alongside flags asks only for what the flags did not answer, so the
 # two ways of driving setup compose instead of one overriding the other.
