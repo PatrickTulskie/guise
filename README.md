@@ -302,6 +302,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise basedir [path]` | show or move the workspace directory, clones included |
 | `guise which` | print the identity owning the current directory |
 | `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
+| `guise version` | print the version of this copy of the script (`--version`, `-v`) |
 
 ## Identity names and the default
 

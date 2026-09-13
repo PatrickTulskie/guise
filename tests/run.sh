@@ -78,6 +78,19 @@ snapshot() {
       "$HOME/.local/bin/guise-gh" 2>/dev/null | shasum | cut -d' ' -f1
 }
 
+# --- version --------------------------------------------------------------------
+# Answerable before anything is installed: every other subcommand needs a config,
+# and "which version is this?" is exactly what you ask of a copy you just cloned.
+echo "version:"
+new_sandbox
+ver=$(agent --version)
+expect_eq "--version reports the version" "$ver" "guise 0.1.0"
+expect_eq "the subcommand form agrees" "$(agent version)" "$ver"
+expect_eq "and the short flag" "$(agent -v)" "$ver"
+expect_eq "the usage banner carries the same one" \
+  "$(agent help | head -1 | cut -d' ' -f1-2)" "$ver"
+expect "no config was needed to answer" test ! -e "$HOME/.config/guise/config"
+
 # --- setup provisions everything --------------------------------------------
 echo "setup:"
 new_sandbox
