@@ -2201,7 +2201,7 @@ usage: guise <command> [flags]
                [--vault <1password vault>] [--op-account <1password account>]
                [--coauthor "Name <email>"] [--base-dir <dir>]
                [--wizard]   ask for the answers instead of taking flags;
-                            this is what a bare `guise setup` does on a
+                            this is what a bare "guise setup" does on a
                             terminal. [--no-wizard] to insist on flags.
   doctor     verify the whole chain; non-zero exit on any failure
              [--name <identity>]
