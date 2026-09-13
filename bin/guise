@@ -1104,10 +1104,17 @@ wizard_setup() {
         "Sign up for a normal GitHub account with its own email address" \
         "(GitHub's terms allow one machine account per person)"
     fi
-    [[ -n "$login" ]] || wz_require login "The agent account's login"
-    if [[ "$(lower "$login")" == "$(lower "$(gh api user --jq .login 2>/dev/null || true)")" ]]; then
-      die "that is your own account -- the agent needs an account of its own"
-    fi
+    # Checkable without the network, so it is re-asked like every other local
+    # mistake rather than ending the run. A logged-out gh answers nothing, which
+    # leaves the real check to cmd_setup once the token names an account.
+    local human=""
+    human=$(gh api user --jq .login 2>/dev/null || true)
+    while :; do
+      [[ -n "$login" ]] || wz_require login "The agent account's login"
+      [[ -n "$human" && "$(lower "$login")" == "$(lower "$human")" ]] || break
+      say "  @$human is your own account -- the agent needs one of its own"
+      login=""
+    done
 
     say ""
     say "Access matters more than it looks: a fine-grained PAT only reaches"
