@@ -472,6 +472,22 @@ expect "and moves nothing when it refuses" test -d "$HOME/src/$APP_IDENT/someclo
 expect "including the identity the path named" test -d "$HOME/src/zeta/zclone"
 expect_eq "with the setting untouched" "$(cfg core.basedir)" "$HOME/src"
 
+# The same overlap reached through a symlink. Compared as typed, ~/link sits
+# outside every identity directory; mv follows the link and lands inside one.
+ln -s "$HOME/src/zeta" "$HOME/zlink"
+expect_fail "basedir refuses a symlinked root that resolves into a moving identity" \
+  agent basedir "$HOME/zlink"
+expect "and still moves nothing" test -d "$HOME/src/$APP_IDENT/someclone"
+expect "including through the link" test -d "$HOME/src/zeta/zclone"
+# A symlinked root that resolves somewhere harmless is still a fine answer --
+# the check must reject the overlap, not the symlink.
+mkdir -p "$SB/realroot"
+ln -s "$SB/realroot" "$HOME/goodlink"
+agent basedir "$HOME/goodlink" >/dev/null 2>&1
+expect_eq "but a symlinked root pointing somewhere else is accepted" "$?" "0"
+expect "and the clones land through it" test -d "$SB/realroot/$APP_IDENT/someclone"
+agent basedir "$HOME/src" >/dev/null 2>&1
+
 # An identity staying put because it has its own workspace, but living inside
 # one that is leaving: its clones would ride along out of their own scope.
 agent basedir "$HOME/src/$APP_IDENT/nested" --name zeta >/dev/null 2>&1
