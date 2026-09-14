@@ -58,9 +58,11 @@ TTY, which is your normal case, it skips the prompt.
 bash tests/run.sh      # ~2min, no network
 ```
 
-Green is the merge gate; CI runs exactly this on every PR (macOS only — see
-below). The harness gives each scenario a fresh sandbox: `$HOME` under
-`mktemp -d`, `$PATH` prefixed with `tests/stubs`, and real git/openssl/jq.
+Green is the merge gate; CI runs exactly this on every PR, on macOS and on
+Linux: macOS is the bash 3.2 and BSD floor described below, Linux is the GNU
+tooling cloud-hosted agents run on. The harness gives each scenario a fresh
+sandbox: `$HOME` under `mktemp -d`, `$PATH` prefixed with `tests/stubs`, and
+real git/openssl/jq.
 
 Three stubs stand in for the outside world, all driven by environment variables
 rather than recorded fixtures:
@@ -173,5 +175,5 @@ bin/guise                the entire tool: subcommands, checks, embedded helpers
 tests/run.sh             the whole suite, in a sandboxed $HOME
 tests/stubs/{op,curl,gh} the outside world
 docs/troubleshooting.md  keyed to real failure modes
-.github/workflows/       CI: the suite, on macOS, on every PR
+.github/workflows/       CI: the suite, on macOS and Linux, on every PR
 ```
