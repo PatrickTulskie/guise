@@ -434,3 +434,7 @@ source work that means one of:
 
 Run `guise doctor` first — every check prints a remediation hint. Then see
 [docs/troubleshooting.md](docs/troubleshooting.md).
+
+## License
+
+MIT, Copyright (c) 2026 Patrick Tulskie @PatrickTulskie
