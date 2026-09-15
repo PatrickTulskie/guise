@@ -431,6 +431,20 @@ source work that means one of:
 - you use a [separate account](#a-separate-github-account-instead-of-an-app),
   which needs no installation on either side.
 
+## Trying it without touching your machine
+
+`setup` writes to your real home directory, which makes "just run it and see"
+an expensive way to look around. The repo ships a container for that instead:
+
+```bash
+docker compose run --rm shell     # then: guise setup
+```
+
+Inside, `$HOME` is disposable, GitHub and 1Password are fakes, and `guise` is
+the copy in your working tree — so the guided setup, `doctor`, `rename` and
+even `uninstall` all run end to end with nothing real at stake. The container
+tells you the account and App ID to answer with when it starts.
+
 ## When something's off
 
 Run `guise doctor` first — every check prints a remediation hint. Then see
