@@ -1,0 +1,22 @@
+# `docker compose run --rm shell` for a machine to break, `... run --rm tests`
+# for the suite on Linux without waiting for CI.
+x-sandbox: &sandbox
+  build:
+    context: .
+    dockerfile: docker/Dockerfile
+  image: guise-sandbox
+  # So the wizard's "Right machine?" answers itself.
+  hostname: guise-sandbox
+  init: true
+  volumes:
+    - .:/work
+
+services:
+  shell:
+    <<: *sandbox
+    stdin_open: true
+    tty: true
+
+  tests:
+    <<: *sandbox
+    command: ["bash", "tests/run.sh"]
