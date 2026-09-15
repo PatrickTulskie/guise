@@ -18,8 +18,15 @@ and still apply. What follows is specific to this repo.
 and takes `~/.config/guise` with it — and it will happily do that to a real
 identity that is currently in use.
 
-Exercise the tool through the test harness, which sandboxes `$HOME`. If you
-genuinely need a manual run, point it somewhere disposable first:
+Exercise the tool through the test harness, which sandboxes `$HOME`, or through
+the container, which sandboxes the whole machine:
+
+```bash
+docker compose run --rm shell     # a $HOME, GitHub and 1Password you can wreck
+```
+
+If you genuinely need a manual run on the host, point it somewhere disposable
+first:
 
 ```bash
 HOME=$(mktemp -d) PATH="tests/stubs:$PATH" bin/guise setup --help
@@ -55,7 +62,8 @@ TTY, which is your normal case, it skips the prompt.
 ## Tests
 
 ```bash
-bash tests/run.sh      # ~2min, no network
+bash tests/run.sh                 # ~2min, no network
+docker compose run --rm tests     # the same suite, on Linux
 ```
 
 Green is the merge gate; CI runs exactly this on every PR, on macOS and on
@@ -83,6 +91,23 @@ Extend a stub when you need new API behavior; do not reach for the network, and
 do not add a fixture file. Assert on observable artifacts — a file mode, a
 config value, what `git config` resolves to inside the scoped directory, a
 byte-identical restore — not on "the command exited 0".
+
+## The container
+
+`docker compose run --rm shell` is a Debian box with the working tree bind
+mounted at `/work` and `docker/entrypoint.sh` standing the fake world up around
+the shell: the stubs ahead of everything on `PATH`, the same `FAKE_*` values the
+suite uses, a fresh `~/sandbox/app-key.pem` for the app path, and `guise`
+resolving to `bin/guise` off the working tree so an edit on the host takes
+effect on the next command. `setup`, `rename` and `uninstall` are all fair game
+in there — the `$HOME` they rewrite dies with the container.
+
+It reaches nothing real. There is no `gh` and no `op` in the image, and the
+stubbed `curl` is the only one on `PATH`, so a run that somehow escapes the fake
+world fails rather than touching the human's account.
+
+The image caches; rebuild it with `docker compose build` after changing
+`docker/`. Nothing else in the repo needs a rebuild.
 
 ## The script is self-contained
 
@@ -175,5 +200,6 @@ bin/guise                the entire tool: subcommands, checks, embedded helpers
 tests/run.sh             the whole suite, in a sandboxed $HOME
 tests/stubs/{op,curl,gh} the outside world
 docs/troubleshooting.md  keyed to real failure modes
+compose.yaml, docker/    a disposable machine to run the tool against by hand
 .github/workflows/       CI: the suite, on macOS and Linux, on every PR
 ```
