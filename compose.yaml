@@ -5,7 +5,7 @@ x-sandbox: &sandbox
     context: .
     dockerfile: docker/Dockerfile
   image: guise-sandbox
-  # So the wizard's "Right machine?" answers itself.
+  # So the banner names the box you're in.
   hostname: guise-sandbox
   init: true
   volumes:

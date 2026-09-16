@@ -978,15 +978,65 @@ require_deps() { # kind
 # reading a pipe is the correct behavior, and is how the suite walks the same
 # path a human does.
 #
+# On a terminal the same prompts draw arrow-key menus and redraw each answered
+# question in place; from a pipe every answer is one line, and a menu takes its
+# key or its number. Everything the wizard draws goes to stderr.
+#
 # These assign through the caller's variable name, so their own locals are
 # underscore-prefixed: bash scoping is dynamic, and a local sharing a name with
 # the caller's variable would have the callee assign to itself instead.
-wz_ask() { # varname "prompt" [default] -- non-zero on EOF
-  local _var="$1" _val="" _rc=0
-  if [[ -n "${3:-}" ]]; then printf '%s [%s]: ' "$2" "$3" >&2
-  else printf '%s: ' "$2" >&2; fi
+
+WZ_TTY="" WZ_COLS=80 WZ_INDEX=0
+WZ_DIM="" WZ_BOLD="" WZ_CYAN="" WZ_GREEN="" WZ_YELLOW="" WZ_INV="" WZ_OFF=""
+
+wz_init() {
+  local _num_re='^[0-9]+$'
+  if [[ -t 0 && -t 2 ]]; then
+    WZ_TTY=1
+    WZ_COLS=$(stty size </dev/tty 2>/dev/null | awk '{print $2}') || WZ_COLS=""
+    [[ "$WZ_COLS" =~ $_num_re && "$WZ_COLS" -gt 0 ]] || WZ_COLS=80
+    # Menus hide the cursor; a ^C mid-menu must not leave it hidden.
+    trap 'printf "\033[?25h" >&2' EXIT
+  fi
+  if [[ -t 2 && -z "${NO_COLOR:-}" && "${TERM:-dumb}" != "dumb" ]]; then
+    WZ_DIM=$'\033[2m' WZ_BOLD=$'\033[1m' WZ_CYAN=$'\033[36m' WZ_GREEN=$'\033[32m'
+    WZ_YELLOW=$'\033[33m' WZ_INV=$'\033[7m' WZ_OFF=$'\033[0m'
+  fi
+}
+
+wz_line() { printf '%s\n' "$*" >&2; }
+wz_bar() {
+  if [[ $# -eq 0 ]]; then wz_line "${WZ_DIM}│${WZ_OFF}"
+  else wz_line "${WZ_DIM}│${WZ_OFF}  $*"; fi
+}
+wz_warn() { wz_bar "${WZ_YELLOW}$*${WZ_OFF}"; }
+wz_done() { wz_line "${WZ_GREEN}◇${WZ_OFF}  $1 ${WZ_DIM}· $2${WZ_OFF}"; }
+wz_row()  { wz_bar "${WZ_DIM}$(printf '%-11s' "$1")${WZ_OFF} $2"; }
+
+wz_section() {
+  wz_bar
+  wz_line "${WZ_DIM}├──${WZ_OFF} ${WZ_CYAN}${WZ_BOLD}$1${WZ_OFF}"
+  wz_bar
+}
+
+# Rewrites the prompt line just answered as a settled one. Skipped when the
+# line could have wrapped: moving up one row would then clobber the wrong one.
+wz_settle() { # "prompt" "answer" <width the prompt line took>
+  [[ -n "$WZ_TTY" && $3 -lt $WZ_COLS ]] || return 0
+  printf '\033[1A\r\033[2K' >&2
+  wz_done "$1" "$2"
+}
+
+wz_ask() { # varname "prompt" [default] [placeholder] -- non-zero on EOF
+  local _var="$1" _val="" _rc=0 _hint="${3:-${4:-}}"
+  if [[ -n "$_hint" ]]; then
+    printf '%s◆%s  %s %s(%s)%s › ' "$WZ_CYAN" "$WZ_OFF" "$2" "$WZ_DIM" "$_hint" "$WZ_OFF" >&2
+  else
+    printf '%s◆%s  %s › ' "$WZ_CYAN" "$WZ_OFF" "$2" >&2
+  fi
   IFS= read -r _val || _rc=1
   [[ -n "$_val" ]] || _val="${3:-}"
+  wz_settle "$2" "${_val:-${4:-ok}}" "$((${#2} + ${#_hint} + ${#_val} + 10))"
   eval "$_var=\"\$_val\""
   return $_rc
 }
@@ -996,7 +1046,7 @@ wz_require() { # varname "prompt" [default] -- re-asks until there is an answer
   while :; do
     wz_ask _got "$2" "${3:-}" || die "setup: ran out of input at '$2'"
     [[ -z "$_got" ]] || break
-    say "  that one is required"
+    wz_warn "that one's required"
   done
   eval "$_var=\"\$_got\""
 }
@@ -1005,58 +1055,185 @@ wz_require() { # varname "prompt" [default] -- re-asks until there is an answer
 # pipe, and it is what lets the suite drive this prompt. Never reaches argv.
 wz_secret() { # varname "prompt" -- non-zero on EOF
   local _var="$1" _val="" _rc=0
-  printf '%s: ' "$2" >&2
+  printf '%s◆%s  %s › ' "$WZ_CYAN" "$WZ_OFF" "$2" >&2
   if [[ -t 0 ]]; then
     IFS= read -r -s _val || _rc=1
     printf '\n' >&2
   else
     IFS= read -r _val || _rc=1
   fi
+  wz_settle "$2" "received" "$((${#2} + 10))"
   eval "$_var=\"\$_val\""
   return $_rc
 }
 
-wz_yes() { # "prompt" <y|n> -- the second argument is the default
-  local _ans
-  while :; do
-    wz_ask _ans "$1 (y/n)" "$2" || die "setup: ran out of input at '$1'"
-    case "$(lower "$_ans")" in
-      y|yes) return 0 ;;
-      n|no)  return 1 ;;
-      *) say "  answer y or n" ;;
-    esac
-  done
+wz_yes() { # "question" <y|n> -- the second argument is the default
+  local _q="$1" _yes="" _k="" _rest="" _ans=""
+  [[ "$2" != "y" ]] || _yes=1
+  if [[ -n "$WZ_TTY" ]]; then
+    printf '\033[?25l' >&2
+    while :; do
+      if [[ -n "$_yes" ]]; then
+        printf '\r\033[2K%s◆%s  %s  %s● Yes%s %s/ ○ No%s' \
+          "$WZ_CYAN" "$WZ_OFF" "$_q" "$WZ_GREEN" "$WZ_OFF" "$WZ_DIM" "$WZ_OFF" >&2
+      else
+        printf '\r\033[2K%s◆%s  %s  %s○ Yes /%s %s● No%s' \
+          "$WZ_CYAN" "$WZ_OFF" "$_q" "$WZ_DIM" "$WZ_OFF" "$WZ_GREEN" "$WZ_OFF" >&2
+      fi
+      IFS= read -rsn1 _k || die "setup: ran out of input at '$_q'"
+      case "$_k" in
+        ""|" ") break ;;
+        y|Y) _yes=1; break ;;
+        n|N) _yes=""; break ;;
+        h|l|$'\t'|$'\033')
+          [[ "$_k" != $'\033' ]] || IFS= read -rsn2 -t 1 _rest || true
+          if [[ -n "$_yes" ]]; then _yes=""; else _yes=1; fi ;;
+      esac
+    done
+    printf '\r\033[2K\033[?25h' >&2
+    wz_done "$_q" "$([[ -n "$_yes" ]] && echo Yes || echo No)"
+  else
+    while :; do
+      wz_ask _ans "$_q (y/n)" "$2" || die "setup: ran out of input at '$_q'"
+      case "$(lower "$_ans")" in
+        y|yes) _yes=1; break ;;
+        n|no)  _yes=""; break ;;
+        *) wz_warn "answer y or n" ;;
+      esac
+    done
+  fi
+  [[ -n "$_yes" ]]
 }
 
-wz_choose() { # varname "prompt" <choice>... -- the first choice is the default
-  local _var="$1" _prompt="$2"; shift 2
-  local _all="$*" _def="$1" _pick="" _c
-  say ""
-  say "$_prompt"
-  while :; do
-    wz_ask _pick "  $(printf '%s' "$_all" | tr ' ' '/')" "$_def" \
-      || die "setup: ran out of input at a choice of $_all"
-    for _c in $_all; do
-      if [[ "$(lower "$_pick")" == "$_c" ]]; then
-        eval "$_var=\"\$_c\""
-        return 0
-      fi
-    done
-    say "  pick one of: $_all"
+# Sets WZ_INDEX as well as the key, for callers whose keys are free text.
+wz_select() { # varname "question" <key> "label" "hint" ... -- the first is the default
+  local _var="$1" _q="$2"; shift 2
+  local _keys=() _labels=() _hints=() _n=0 _i _cur=0 _k="" _rest="" _ans="" _drawn=""
+  while [[ $# -gt 0 ]]; do
+    _keys[$_n]="$1"; _labels[$_n]="$2"; _hints[$_n]="$3"
+    _n=$((_n + 1)); shift 3
   done
+
+  wz_line "${WZ_CYAN}◆${WZ_OFF}  $_q"
+  if [[ -n "$WZ_TTY" ]]; then
+    printf '\033[?25l' >&2
+    while :; do
+      [[ -z "$_drawn" ]] || printf '\033[%dA' "$((_n + 1))" >&2
+      _drawn=1
+      for ((_i = 0; _i < _n; _i++)); do
+        printf '\r\033[2K' >&2
+        if [[ $_i -ne $_cur ]]; then
+          wz_line "${WZ_DIM}│  ○ ${_labels[$_i]}${WZ_OFF}"
+        elif [[ -n "${_hints[$_i]}" && $((${#_labels[$_i]} + ${#_hints[$_i]} + 10)) -lt $WZ_COLS ]]; then
+          wz_bar "${WZ_GREEN}●${WZ_OFF} ${_labels[$_i]}  ${WZ_DIM}${_hints[$_i]}${WZ_OFF}"
+        else
+          wz_bar "${WZ_GREEN}●${WZ_OFF} ${_labels[$_i]}"
+        fi
+      done
+      printf '\r\033[2K' >&2
+      wz_line "${WZ_DIM}└  ↑/↓ to move · enter to choose${WZ_OFF}"
+      IFS= read -rsn1 _k || die "setup: ran out of input at '$_q'"
+      case "$_k" in
+        ""|" ") break ;;
+        k) _cur=$(( (_cur + _n - 1) % _n )) ;;
+        j) _cur=$(( (_cur + 1) % _n )) ;;
+        [1-9]) [[ $_k -gt $_n ]] || _cur=$((_k - 1)) ;;
+        $'\033')
+          IFS= read -rsn2 -t 1 _rest || true
+          case "$_rest" in
+            "[A") _cur=$(( (_cur + _n - 1) % _n )) ;;
+            "[B") _cur=$(( (_cur + 1) % _n )) ;;
+          esac ;;
+      esac
+    done
+    printf '\033[%dA\r\033[J\033[?25h' "$((_n + 2))" >&2
+  else
+    for ((_i = 0; _i < _n; _i++)); do
+      wz_bar "$((_i + 1)). ${_labels[$_i]} ${WZ_DIM}[${_keys[$_i]}]${WZ_OFF}"
+    done
+    _cur=""
+    while [[ -z "$_cur" ]]; do
+      wz_ask _ans "Pick one" "${_keys[0]}" || die "setup: ran out of input at '$_q'"
+      for ((_i = 0; _i < _n; _i++)); do
+        if [[ "$(lower "$_ans")" == "$(lower "${_keys[$_i]}")" || "$_ans" == "$((_i + 1))" ]]; then
+          _cur=$_i; break
+        fi
+      done
+      [[ -n "$_cur" ]] || wz_warn "pick one of: ${_keys[*]}"
+    done
+  fi
+  wz_done "$_q" "${_labels[$_cur]}"
+  WZ_INDEX=$_cur
+  eval "$_var=\"\${_keys[\$_cur]}\""
 }
 
 # The steps with no API behind them. Printed as a checklist and waited on rather
 # than folded into the narration: claiming to have done a browser step is how
 # someone ends up debugging a missing installation instead of re-reading a step
-# they skipped.
-wz_browser() { # "line"...
-  local _line _ignored
-  say ""
-  say "  -- in a browser, then come back ------------------------------------"
-  for _line in "$@"; do say "  $_line"; done
-  wz_ask _ignored "press return once that is done" "ok" \
-    || die "setup: ran out of input"
+# they skipped. Indented lines continue the step above them.
+wz_browser() { # "title" "step"...
+  local _line _n=0 _ignored=""
+  wz_bar
+  wz_line "${WZ_YELLOW}◇${WZ_OFF}  ${WZ_BOLD}$1${WZ_OFF} ${WZ_DIM}— over to your browser${WZ_OFF}"
+  shift
+  for _line in "$@"; do
+    case "$_line" in
+      " "*) wz_bar "  $_line" ;;
+      *)    _n=$((_n + 1)); wz_bar "$_n. $_line" ;;
+    esac
+  done
+  wz_bar
+  printf "%s◆%s  Press enter once that's done › " "$WZ_CYAN" "$WZ_OFF" >&2
+  IFS= read -r _ignored || die "setup: ran out of input"
+  wz_settle "Press enter once that's done" "done" "$((${#_ignored} + 40))"
+}
+
+wz_url() { printf '%s%s%s' "$WZ_CYAN" "$1" "$WZ_OFF"; }
+
+wz_intro() {
+  wz_line ""
+  wz_line "${WZ_DIM}┌${WZ_OFF}  ${WZ_INV} guise ${WZ_OFF}  ${WZ_BOLD}Let's give your agent a GitHub identity of its own${WZ_OFF}"
+  wz_bar
+  wz_bar "Its commits will say they came from the agent, with you as co-author,"
+  wz_bar "and it only gets the access you hand it. A few questions, a browser"
+  wz_bar "step or two, and one last look before anything is written."
+  wz_bar "${WZ_DIM}^C whenever you like -- nothing changes until you say so.${WZ_OFF}"
+}
+
+# Signing is on by default in the wizard, which makes this the step most runs
+# end on, so it is walked through and checked rather than left to doctor.
+wz_register_signing_key() { # <login> <public key file>
+  local _login="$1" _body _again=""
+  _body=$(pubkey_body "$2")
+  if account_signing_keys "$_login" 2>/dev/null | grep -qxF "$_body"; then
+    return 0
+  fi
+  while :; do
+    wz_browser "Add the signing key to @$_login" \
+      "Signed in as @$_login, open $(wz_url https://github.com/settings/ssh/new)" \
+      "Key type: Signing Key" \
+      "Paste this in as the key:" \
+      " $_body"
+    if account_signing_keys "$_login" 2>/dev/null | grep -qxF "$_body"; then
+      wz_bar "${WZ_GREEN}Found it -- @$_login's commits will show up Verified.${WZ_OFF}"
+      return 0
+    fi
+    wz_select _again "GitHub doesn't list that key on @$_login yet." \
+      retry "Check again" "" \
+      skip "Skip for now" "commits still sign; doctor nags until it's added"
+    if [[ "$_again" == "skip" ]]; then
+      wz_bar "${WZ_DIM}No problem -- doctor flags it below until it's there.${WZ_OFF}"
+      return 0
+    fi
+  done
+}
+
+wz_outro() { # identity
+  wz_line ""
+  wz_line "${WZ_GREEN}◆${WZ_OFF}  ${WZ_BOLD}$1 is ready.${WZ_OFF}"
+  wz_bar "Clone something for it:  guise clone <owner/repo>"
+  wz_bar "Hop into its workspace:  guise use $1"
+  wz_line "${WZ_DIM}└${WZ_OFF}  Happy building."
 }
 
 # Fills in the flags a flag-driven `setup` would have been given, then returns
@@ -1070,207 +1247,212 @@ wz_browser() { # "line"...
 # API -- and nothing has been written to disk by the time those calls run, so a
 # rejected credential means re-running, not repairing.
 wizard_setup() {
-  local existing="" repair="" reuse="" pem_ok=""
-
-  say "guise setup, guided. Answers become the flags; ^C to stop."
-  say ""
-  say "This writes to the home directory of the machine it runs on:"
-  say "  $(display_path "$CONFIG_DIR")  config, rendered git confs, commit hook"
-  say "  $(display_path "$BIN_DIR")  guise, guise-token, guise-credential, guise-gh"
-  say "  ~/.gitconfig  one include block between markers"
-  say "  host $(uname -n), home $HOME"
-  wz_yes "Right machine?" y || die "nothing written -- run this on the machine that does the work"
+  local existing="" choice="" reuse="" pem_ok="" human="" derived="" n="" count=""
+  wz_init
+  wz_intro
 
   existing=$(list_identities)
   if [[ -n "$existing" ]]; then
-    say ""
-    say "identities already set up: $(printf '%s' "$existing" | tr '\n' ' ')"
-    if wz_yes "Re-run setup for one of those instead of adding a new one?" n; then
-      wz_require repair "which one" "$(default_identity)"
-      identity_exists "$repair" || die "identity '$repair' not in config"
-      # Every other answer is already in the config, and a bare re-run is the
-      # advertised repair action, so there is nothing left to ask -- but the
-      # answers still have to be handed over, or cmd_setup asks for the ones it
-      # needs and a piped wizard dies on the first of them.
-      name="$repair"
-      kind=$(identity_kind "$repair")
-      if [[ "$kind" == "app" ]]; then
-        owner=$(cfg_get "identity.$repair.owner" || true)
-        app_id=$(cfg_get "identity.$repair.appid" || true)
-      else
-        login=$(cfg_get "identity.$repair.login" || true)
-      fi
-      say ""
-      say "re-running for '$repair' with its stored settings"
+    local menu=(new "Set up a new identity" "")
+    for n in $existing; do
+      menu+=("$n" "Repair $n" "re-run setup with its saved settings")
+    done
+    count=$(printf '%s\n' "$existing" | wc -l | tr -d ' ')
+    wz_bar
+    if [[ "$count" == "1" ]]; then
+      wz_select choice "You already have $existing set up. What's next?" "${menu[@]}"
+    else
+      wz_select choice "You already have $count identities set up. What's next?" "${menu[@]}"
+    fi
+    if [[ $WZ_INDEX -ne 0 ]]; then
+      # Every other answer is already in the config, and a re-run by name is
+      # the advertised repair action, so there is nothing left to ask.
+      name="$choice"
+      wz_line "${WZ_DIM}└${WZ_OFF}  Re-running setup for $choice with its saved settings."
+      wz_line ""
       return 0
     fi
   fi
 
-  [[ -z "$kind" ]] || say "kind: $kind (given)"
-  [[ -n "$kind" ]] || wz_choose kind \
-    "What kind of identity? 'app' is a GitHub App bot -- one credential, works
-  only on repos where the app is installed. 'user' is a separate GitHub account
-  with a PAT -- can be given access anywhere, costs a seat in a paid org." \
-    app user
+  wz_section "The agent"
+  if [[ -n "$kind" ]]; then
+    wz_done "Kind" "$kind (from --kind)"
+  else
+    wz_select kind "How should your agent show up on GitHub?" \
+      user "As its own GitHub account" "recommended · works anywhere it's invited, signs commits" \
+      app  "As a GitHub App bot" "shows up as name[bot] · only where the app is installed"
+  fi
   require_deps "$kind"
 
   if [[ "$kind" == "app" ]]; then
-    if ! wz_yes "Is the GitHub App created already?" y; then
-      wz_browser \
-        "Settings -> Developer settings -> GitHub Apps -> New GitHub App" \
-        "  name it <yourname>-agent (globally unique)" \
-        "  Webhook: uncheck Active" \
-        "  Where can it be installed: Any account" \
-        "  Repository permissions: Contents R/W, Pull requests R/W," \
-        "    Issues R/W, Checks Read, Workflows no access" \
-        "Then: Generate a private key (downloads a .pem), and note the App ID"
+    if ! wz_yes "Have you created the GitHub App yet?" y; then
+      wz_browser "Create the app" \
+        "Open $(wz_url https://github.com/settings/apps/new)" \
+        "Name it <yourname>-agent -- app names are global, so make it yours" \
+        "Under Webhook, uncheck Active" \
+        "Where can it be installed: Any account" \
+        "Repository permissions: Contents, Pull requests and Issues Read and write," \
+        " Checks Read-only, Workflows No access" \
+        "Create it, then Generate a private key (a .pem downloads) and note the App ID"
     fi
-    [[ -n "$owner" ]] || wz_require owner "GitHub account (user or org) the app is installed on"
+    [[ -n "$owner" ]] || wz_require owner "Which account or org will it be installed on?"
     local num_re='^[0-9]+$'
     while [[ ! "$app_id" =~ $num_re ]]; do
       [[ -z "$app_id" ]] \
-        || say "  the App ID is a number -- not the client ID, and not the app name"
-      wz_require app_id "App ID (top of the app settings page)"
+        || wz_warn "the App ID is a number -- not the client ID, and not the app's name"
+      wz_require app_id "App ID (top of the app's settings page)"
     done
 
     # A second installation of an app already set up needs no new key, which is
     # worth offering: the download is one-time-only on GitHub's side.
     reuse=$(find_identity_by_appid "$app_id") || reuse=""
     if [[ -n "$reuse" ]]; then
-      say ""
-      say "app $app_id already has a stored key (identity '$reuse')"
-      if wz_yes "Reuse it?" y; then pem=""; else reuse=""; fi
+      if wz_yes "App $app_id already has a key stored for $reuse. Reuse it?" y; then
+        pem=""
+      else
+        reuse=""
+      fi
     fi
     if [[ -z "$reuse" && -z "$pem" ]]; then
       while :; do
         wz_require pem "Path to the downloaded .pem"
         case "$pem" in "~/"*) pem="$HOME/${pem#\~/}" ;; esac
         pem_ok=""
-        if [[ ! -f "$pem" ]]; then say "  no file at $pem"
+        if [[ ! -f "$pem" ]]; then wz_warn "nothing at $pem"
         elif ! openssl pkey -in "$pem" -noout 2>/dev/null; then
-          say "  $pem is not a private key -- that download is the .pem, not the app page"
+          wz_warn "$pem isn't a private key -- look for the .pem download, not the app page"
         else pem_ok=1; fi
         [[ -z "$pem_ok" ]] || break
       done
-      say "  the .pem is shredded once its key is stored"
+      wz_bar "${WZ_DIM}The .pem gets shredded once its key is stored safely.${WZ_OFF}"
     fi
 
-    wz_browser \
-      "App settings -> Install App -> $owner" \
-      "  pick All repositories, or just the ones the agent works in" \
-      "If any of those repos requires signed commits, add the app to the" \
-      "ruleset's bypass list (Settings -> Rules -> Rulesets -> Bypass list" \
-      "-> Apps -> Always), or the first push is rejected"
+    wz_browser "Install the app on $owner" \
+      "App settings → Install App → $owner" \
+      "Pick All repositories, or just the ones the agent works in" \
+      "If a repo requires signed commits, add the app to its ruleset's bypass list" \
+      " Settings → Rules → Rulesets → Bypass list → Apps → Always"
   else
-    if ! wz_yes "Does the agent's GitHub account exist already?" y; then
-      wz_browser \
-        "Sign up for a normal GitHub account with its own email address" \
-        "(GitHub's terms allow one machine account per person)"
+    if ! wz_yes "Does the agent have its own GitHub account yet?" y; then
+      wz_browser "Make the agent an account" \
+        "Sign up at $(wz_url https://github.com/signup) with an email address of its own" \
+        " GitHub allows one machine account per person, next to your own"
     fi
     # Checkable without the network, so it is re-asked like every other local
     # mistake rather than ending the run. A logged-out gh answers nothing, which
     # leaves the real check to cmd_setup once the token names an account.
-    local human=""
     human=$(gh api user --jq .login 2>/dev/null || true)
     while :; do
-      [[ -n "$login" ]] || wz_require login "The agent account's login"
+      [[ -n "$login" ]] || wz_require login "What's the agent account's login?"
       [[ -n "$human" && "$(lower "$login")" == "$(lower "$human")" ]] || break
-      say "  @$human is your own account -- the agent needs one of its own"
+      wz_warn "@$human is you -- the agent needs an account of its own"
       login=""
     done
 
-    say ""
-    say "Access matters more than it looks: a fine-grained PAT only reaches"
-    say "repos owned by the resource owner it was issued for, and the picker"
-    say "lists an org only if @$login is a MEMBER of it. Added as an outside"
-    say "collaborator, @$login can only issue a token scoped to itself, which"
-    say "reaches nothing the org owns -- with write access to the repo."
-    if ! wz_yes "Is @$login already a member of the org (or are the repos its own)?" y; then
-      wz_browser \
-        "Add @$login to a team in the org (this costs a seat in a paid org)" \
-        "Can't? A classic PAT with the 'repo' scope honors outside-collaborator" \
-        "access without a seat, at the cost of per-repo selection"
-    fi
 
     reuse=$(find_identity_by_login "$login") || reuse=""
     if [[ -n "$token_file" ]]; then
-      say ""
-      say "token: reading $token_file (given), which is shredded after storing"
-    elif [[ -n "$reuse" ]] && wz_yes "A token for @$login is already stored -- reuse it?" y; then
+      wz_done "Token" "$token_file (from --token-file)"
+    elif [[ -n "$reuse" ]] && wz_yes "A token for @$login is already stored. Reuse it?" y; then
       : # the main path finds it by login, exactly as a bare re-run does
     else
-      wz_browser \
-        "Signed in AS @$login: Settings -> Developer settings ->" \
-        "Personal access tokens -> Fine-grained tokens -> Generate new token" \
-        "  Resource owner: whoever OWNS the repos -- the org, not @$login" \
-        "  Repository access: only the repos the agent works in" \
-        "  Permissions: Contents R/W, Pull requests R/W, Issues R/W" \
-        "  Expiration: whatever you will actually rotate (doctor fails 30 days out)" \
-        "Copy the token; it is shown once"
+      wz_browser "Make a token for @$login" \
+        "Signed in as @$login, open $(wz_url "https://github.com/settings/tokens/new?scopes=repo&description=guise")" \
+        "That's a classic token with the repo scope already ticked -- it reaches" \
+        " any repo @$login is added to as a collaborator" \
+        "Expiration: whatever you'll actually rotate (doctor fails 30 days out)" \
+        "Generate it and copy the token -- GitHub only shows it once"
       # Straight into a variable in this process: never in argv, and never
       # written to disk on the way to being stored.
-      wz_secret wizard_token "Paste the token (not echoed)" \
+      wz_secret wizard_token "Paste the token (it won't show)" \
         || die "setup: no token on stdin"
       [[ -n "$wizard_token" ]] || die "setup: empty token"
     fi
+  fi
 
-    if [[ -z "$sign" ]]; then
-      say ""
-      say "Signing is worth it if the repos require signed commits. The key is"
-      say "generated here and stays here; registering its public half is a"
-      say "browser step on @$login, which setup prints at the end."
-      if wz_yes "SSH-sign this identity's commits?" n; then sign=1; else sign=0; fi
+  wz_section "Keeping it safe"
+  if [[ "$kind" == "user" ]]; then
+    if [[ -n "$sign" ]]; then
+      wz_done "Signing" "$([[ "$sign" == "1" ]] && echo on || echo off) (from the flags)"
+    else
+      wz_bar "Signed commits show up Verified on GitHub. The key is made here and"
+      wz_bar "never leaves this machine; its public half goes on @$login at the end."
+      if wz_yes "Sign @$login's commits?" y; then sign=1; else sign=0; fi
     fi
   fi
 
-  [[ -n "$store" ]] || wz_choose store \
-    "Where should the credential live? 'op' is 1Password, read on demand -- a
-  locked vault then blocks the agent. 'file' is mode 600 under
-  $(display_path "$KEYS_DIR"), which suits an agent that runs unattended." \
-    op file
+  if [[ -n "$store" ]]; then
+    wz_done "Credential" "$store (from --store)"
+  elif command -v op >/dev/null; then
+    wz_select store "Where should the $([[ "$kind" == "user" ]] && echo token || echo "private key") live?" \
+      file "In a file on this machine" "recommended · mode 600 under $(display_path "$KEYS_DIR")" \
+      op   "In 1Password" "read on demand · a locked vault pauses the agent"
+  else
+    store=file
+    wz_done "Credential" "a file on this machine (no 1Password CLI found)"
+  fi
   if [[ "$store" == "op" ]]; then
     command -v op >/dev/null \
-      || die "the 1Password CLI (op) is not installed -- re-run and choose 'file'"
+      || die "the 1Password CLI (op) is not installed -- re-run and choose a file"
     while :; do
-      wz_require vault "1Password vault" "$vault"
+      wz_require vault "Which 1Password vault?" "$vault"
       if [[ -n "$op_account" ]]; then
         op --account "$op_account" vault get "$vault" >/dev/null 2>&1 && break
       else
         op vault get "$vault" >/dev/null 2>&1 && break
       fi
-      say "  can't reach vault '$vault' -- not signed in (op signin), or no such vault"
+      wz_warn "can't reach vault '$vault' -- sign in with 'op signin', or check the name"
     done
   fi
 
+  wz_section "Where it lives"
+  if [[ "$kind" == "user" ]]; then derived="$login"; else derived="named after the app"; fi
   # Empty is a real answer here: it means "name it after the account", which is
   # what setup does with no --name. The name pattern is checked by cmd_setup
   # either way, so a bad one dies there with the same message a flag gets.
   [[ -n "$name" ]] \
-    || wz_ask name "Identity name, or empty to name it after the account" \
+    || wz_ask name "Name this identity" "" "$derived" \
     || die "setup: ran out of input"
-  [[ -n "$base" ]] || wz_require base "Workspace directory for the clones" "$(basedir)"
+  [[ -n "$base" ]] || wz_require base "Where should its clones live?" "$(display_path "$(basedir)")"
   case "$base" in "~") base="$HOME" ;; "~/"*) base="$HOME/${base#\~/}" ;; esac
 
-  if [[ -z "$make_default" && -n "$existing" ]] \
-     && wz_yes "Make this the identity commands fall back to?" n; then
+  if [[ -n "$make_default" ]]; then
+    wz_done "Default identity" "yes (from --default)"
+  elif [[ -z "$existing" ]]; then
+    wz_done "Default identity" "yes, it's your first"
+  elif wz_yes "Make it your default identity?" y; then
     make_default=1
   fi
 
-  say ""
-  say "  kind:       $kind"
+  wz_section "One last look"
   if [[ "$kind" == "app" ]]; then
-    say "  app:        $app_id on $owner"
-    [[ -z "$pem" ]] || say "  key:        $pem (shredded after storing)"
-    [[ -z "$reuse" ]] || say "  key:        reusing the one stored for '$reuse'"
+    wz_row "App" "$app_id, installed on $owner"
+    if [[ -n "$reuse" ]]; then wz_row "Key" "reusing the one stored for $reuse"
+    else wz_row "Key" "$(display_path "$pem") ${WZ_DIM}(shredded once stored)${WZ_OFF}"; fi
   else
-    say "  account:    @$login"
-    say "  signing:    $([[ "$sign" == "1" ]] && echo "on" || echo "off")"
+    wz_row "Account" "@$login"
+    if [[ -n "$token_file" ]]; then wz_row "Token" "$token_file ${WZ_DIM}(shredded once stored)${WZ_OFF}"
+    elif [[ -n "$wizard_token" ]]; then wz_row "Token" "the one you just pasted"
+    else wz_row "Token" "reusing the one already stored"; fi
+    if [[ "$sign" == "1" ]]; then wz_row "Signing" "on, with a key made on this machine"
+    else wz_row "Signing" "off"; fi
   fi
-  say "  credential: $store$([[ "$store" == "op" ]] && printf ' (vault %s)' "$vault")"
-  say "  name:       ${name:-derived from the account}"
-  say "  workspace:  $(display_path "$base")/<identity>/"
-  say ""
-  wz_yes "Go?" y || die "nothing written"
+  if [[ "$store" == "op" ]]; then wz_row "Stored in" "1Password, vault $vault"
+  else wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")"; fi
+  wz_row "Identity" "${name:-$derived}"
+  wz_row "Clones in" "$(display_path "$base")/${name:-${login:-<app name>}}/"
+  if [[ -n "$make_default" || -z "$existing" ]]; then wz_row "Default" "yes"
+  else wz_row "Default" "no, $(default_identity) stays"; fi
+  wz_bar
+  wz_bar "${WZ_DIM}Writes $(display_path "$CONFIG_DIR"), a few helpers in $(display_path "$BIN_DIR"),${WZ_OFF}"
+  wz_bar "${WZ_DIM}and one marked block in ~/.gitconfig.${WZ_OFF}"
+  wz_bar
+  if ! wz_yes "Look good?" y; then
+    wz_line "${WZ_DIM}└${WZ_OFF}  No worries -- nothing was written."
+    exit 1
+  fi
+  wz_line "${WZ_DIM}└${WZ_OFF}  On it."
+  wz_line ""
 }
 
 # ---------------------------------------------------------------------------
@@ -1534,7 +1716,8 @@ cmd_setup() {
     sign_key="$KEYS_DIR/$name.signing"
     say "==> provisioning an SSH signing key for @$login"
     generate_signing_key "$sign_key" "guise $name"
-    announce_signing_key "$login" "$sign_key.pub"
+    # The wizard walks this step through once everything else is in place.
+    [[ "$wizard" == "1" ]] || announce_signing_key "$login" "$sign_key.pub"
   elif signing_enabled "$name"; then
     # Shredding now would leave a rendered conf that still signs, naming a key
     # that is gone, if anything below this died -- storing the secret can. Same
@@ -1665,7 +1848,13 @@ cmd_setup() {
     say "    -- open a new shell, or: . $(display_path "$rc_path")"
   fi
   say ""
+  if [[ "$wizard" != "1" ]]; then
+    cmd_doctor --name "$name"
+    return
+  fi
+  [[ -z "$want_sign" ]] || wz_register_signing_key "$login" "$sign_key.pub"
   cmd_doctor --name "$name"
+  wz_outro "$name"
 }
 
 # ---------------------------------------------------------------------------

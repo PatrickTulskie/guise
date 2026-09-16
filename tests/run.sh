@@ -1042,12 +1042,12 @@ expect "and help provisions nothing" test ! -e "$HOME/.config/guise/config"
 # each block below lists them in order.
 echo "guided setup:"
 
-# machine, kind, app-exists, owner, app id, pem, browser pause, store, name,
-# workspace, go
+# kind, app-exists, owner, app id, pem, browser pause, store, name, workspace,
+# go
 wizard() { "$ROOT/bin/guise" setup --wizard; }
 
 new_sandbox
-printf 'y\napp\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \
   | wizard >/dev/null 2>&1
 expect_eq "a guided app setup exits 0" "$?" "0"
 # The whole design claim: the wizard only fills in flags, so it has to land the
@@ -1063,45 +1063,46 @@ expect_eq "doctor passes on a guided install" "$?" "0"
 
 # A second app identity: the stored key is offered rather than asked for, so
 # there is no pem answer here -- reuse, browser pause, store, name, ...
-printf 'y\nn\napp\ny\npatricktulskie\n1111\ny\nok\nfile\nsecond\n\nn\ny\n' \
+printf 'new\napp\ny\npatricktulskie\n1111\ny\nok\nfile\nsecond\n\nn\ny\n' \
   | wizard >/dev/null 2>&1
 expect_eq "a second identity for the same app exits 0" "$?" "0"
 expect "and reuses the stored key without asking for a PEM" test -d "$HOME/agentic-code/second"
 expect_eq "without stealing the default" "$(cfg core.defaultidentity)" "$APP_IDENT"
+printf 'new\napp\ny\npatricktulskie\n1111\ny\nok\n\nthird\n\n\ny\n' \
+  | wizard >/dev/null 2>&1
+expect_eq "unless asked to, which is what enter does" "$(cfg core.defaultidentity)" "third"
 
 # A name and a workspace typed at the prompts, rather than derived.
 new_sandbox
-printf 'y\napp\ny\npatricktulskie\n1111\n%s\nok\nfile\nchosen\n%s\ny\n' \
+printf 'app\ny\npatricktulskie\n1111\n%s\nok\nfile\nchosen\n%s\ny\n' \
   "$SB/key.pem" "$HOME/elsewhere" | wizard >/dev/null 2>&1
 expect "an answered name becomes the identity" test -d "$HOME/elsewhere/chosen"
 expect_eq "and an answered workspace becomes the basedir" "$(cfg core.basedir)" "$HOME/elsewhere"
 
-# Declining at the summary, or at the first question, has to leave no trace --
-# the whole point of asking before doing anything.
+# Declining at the summary has to leave no trace -- the whole point of asking
+# before doing anything.
 new_sandbox
-printf 'y\napp\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\nn\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\nn\n' "$SB/key.pem" \
   | wizard >/dev/null 2>&1
 expect_eq "declining at the summary fails" "$?" "1"
 expect "and writes no config" test ! -e "$HOME/.config/guise/config"
 expect "and leaves the PEM alone" test -f "$SB/key.pem"
-printf 'n\n' | wizard >/dev/null 2>&1
-expect_eq "so does answering the wrong machine" "$?" "1"
-expect "with nothing written" test ! -e "$HOME/.config/guise/config"
 
 # Anything checkable without the network is re-asked, not fatal: a bad choice,
-# a non-numeric app id, and a path with no key at it.
-printf 'y\nmaybe\napp\ny\npatricktulskie\nnotanumber\n1111\n/nonesuch.pem\n%s\nok\nfile\n\n\ny\n' \
+# a non-numeric app id, and a path with no key at it. A menu also takes the
+# number of its choice.
+printf 'maybe\n2\ny\npatricktulskie\nnotanumber\n1111\n/nonesuch.pem\n%s\nok\nfile\n\n\ny\n' \
   "$SB/key.pem" | wizard >/dev/null 2>&1
 expect_eq "a bad choice, app id, and PEM path are all re-asked" "$?" "0"
 expect_eq "and the run still completes correctly" "$(cfg identity.$APP_IDENT.installationid)" "2222"
 
-# machine, kind, account-exists, login, org-member, browser pause, token, sign,
-# store, name, workspace, go
+# kind, account-exists, login, browser pause, token, sign, store,
+# name, workspace, go, signing-key browser pause, check again or skip
 new_sandbox
-printf 'y\nuser\ny\npatrick-agent\ny\nok\ngithub_pat_wizard\ny\nfile\n\n\ny\n' \
+printf 'user\ny\npatrick-agent\nok\ngithub_pat_wizard\n\n\n\n\ny\nok\nskip\n' \
   | wizard >/dev/null 2>&1
-# Non-zero, and correctly so: signing was turned on at the prompt and the key
-# is not on the account yet, which is the browser step setup prints at the end.
+# Non-zero, and correctly so: the key was skipped rather than added to the
+# account, so doctor still reports the one gap setup can't close.
 expect_eq "a guided account setup ends on the one gap it can't close" "$?" "1"
 expect_eq "kind recorded" "$(cfg identity.$USER_IDENT.kind)" "user"
 expect_eq "user id discovered from the API" "$(cfg identity.$USER_IDENT.userid)" "4444"
@@ -1109,7 +1110,8 @@ expect_eq "user id discovered from the API" "$(cfg identity.$USER_IDENT.userid)"
 # never in a file of its own on the way there.
 expect_eq "the pasted token is what got stored" \
   "$(cat "$HOME/.config/guise/keys/$USER_IDENT.token")" "github_pat_wizard"
-expect_eq "signing turned on at the prompt" "$(cfg identity.$USER_IDENT.signing)" "ssh"
+expect_eq "and kept in a file unless told otherwise" "$(cfg identity.$USER_IDENT.keysource)" "file"
+expect_eq "signing is on unless declined" "$(cfg identity.$USER_IDENT.signing)" "ssh"
 expect "signing key generated" test -f "$HOME/.config/guise/keys/$USER_IDENT.signing"
 printf '%s\n' "$(awk '{print $1" "$2}' "$HOME/.config/guise/keys/$USER_IDENT.signing.pub")" \
   >> "$SIGNING_KEYS_FILE"
@@ -1120,7 +1122,7 @@ expect_eq "doctor passes on a guided account install" "$?" "0"
 # other answer is already in the config, and a bare re-run is the documented
 # repair action.
 snap_guided=$(snapshot)
-printf 'y\ny\n%s\n' "$USER_IDENT" | wizard >/dev/null 2>&1
+printf '%s\n' "$USER_IDENT" | wizard >/dev/null 2>&1
 expect_eq "re-running an existing identity through the wizard exits 0" "$?" "0"
 expect_eq "and changes nothing" "$(snapshot)" "$snap_guided"
 
@@ -1129,7 +1131,7 @@ expect_eq "and changes nothing" "$(snapshot)" "$snap_guided"
 new_sandbox
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 snap_app=$(snapshot)
-printf 'y\ny\n%s\n' "$APP_IDENT" | wizard >/dev/null 2>&1
+printf '%s\n' "$APP_IDENT" | wizard >/dev/null 2>&1
 expect_eq "re-running an app identity through the wizard exits 0" "$?" "0"
 expect_eq "without asking for the owner and App ID again" "$(snapshot)" "$snap_app"
 expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1111"
@@ -1139,7 +1141,7 @@ expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1
 # wizard asks again instead of ending the run.
 new_sandbox
 export FAKE_GH_LOGIN=PatrickTulskie
-printf 'y\nuser\ny\nPatrickTulskie\npatrick-agent\ny\nok\ngithub_pat_wiz\nn\nfile\n\n\ny\n' \
+printf 'user\ny\nPatrickTulskie\npatrick-agent\nok\ngithub_pat_wiz\nn\nfile\n\n\ny\n' \
   | wizard >/dev/null 2>&1
 expect_eq "answering the human's own login is re-asked, not fatal" "$?" "0"
 expect_eq "and the agent account is what got set up" \
@@ -1149,7 +1151,7 @@ unset FAKE_GH_LOGIN
 # --wizard alongside flags asks only for what the flags did not answer, so the
 # two ways of driving setup compose instead of one overriding the other.
 new_sandbox
-printf 'y\ny\nok\n\n\ny\n' | "$ROOT/bin/guise" setup --wizard \
+printf 'y\nok\n\n\ny\n' | "$ROOT/bin/guise" setup --wizard \
   --kind app --owner patricktulskie --app-id 1111 --pem "$SB/key.pem" \
   --store file >/dev/null 2>&1
 expect_eq "--wizard with flags exits 0" "$?" "0"
