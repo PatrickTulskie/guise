@@ -1162,20 +1162,29 @@ expect_eq "including the store" "$(cfg identity.$APP_IDENT.keysource)" "file"
 # nothing it draws may need the cursor moved to take it back. util-linux and
 # BSD script disagree on where the command goes, and BSD script hands the pty
 # an EOF the moment its stdin closes -- so stdin is held open until the command
-# is done.
-in_pty() { # "command"
-  local done="$SB/pty.done"
+# is done. A watchdog turns a stuck pty into a failure instead of a hung job.
+pty_script() {
+  if script --version >/dev/null 2>&1; then exec script -qec "$1" /dev/null
+  else exec script -q /dev/null bash -c "$1"; fi
+}
+in_pty() { # "command" -- stdin is what gets typed
+  local done="$SB/pty.done" pid watchdog rc=0
   mkfifo "$done"
-  { cat; read -r _ < "$done"; } | if script --version >/dev/null 2>&1; then
-    script -qec "$1; : > '$done'" /dev/null
-  else
-    script -q /dev/null bash -c "$1; : > '$done'"
-  fi
+  exec 3<&0
+  { cat <&3; read -r _ < "$done"; } | pty_script "$1; : > '$done'" &
+  pid=$!
+  exec 3<&-
+  ( sleep 30; kill "$pid"; : > "$done" ) 2>/dev/null &
+  watchdog=$!
+  wait "$pid" || rc=$?
+  kill "$watchdog" 2>/dev/null || true
   rm -f "$done"
+  return $rc
 }
 new_sandbox
 printf 'app\ny\npatricktulskie\n1111\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
   | TERM=dumb in_pty "'$ROOT/bin/guise' setup" > "$SB/dumb.out" 2>&1
+grep -q "Look good?" "$SB/dumb.out" || sed 's/^/    | /' "$SB/dumb.out"
 expect "a bare setup on a dumb terminal still runs the wizard" \
   grep -q "Look good?" "$SB/dumb.out"
 expect_fail "without a single escape sequence" grep -q $'\033' "$SB/dumb.out"
