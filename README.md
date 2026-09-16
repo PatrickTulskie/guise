@@ -146,7 +146,8 @@ accidentally commit it.
 
 Pass `--store op` to keep it in 1Password instead, read on demand. The secret
 never touches disk that way, but a locked vault blocks the agent until you
-unlock it.
+unlock it. Moving an existing identity into 1Password shreds its file once the
+move lands; moving it back out leaves the 1Password item alone.
 
 ## A GitHub App bot instead
 

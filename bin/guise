@@ -1807,6 +1807,13 @@ cmd_setup() {
     drop_sign=$(signing_key "$name")
   fi
 
+  # A secret moving into 1Password leaves a file the config no longer tracks.
+  # Shredded at the very end, by the same rule as the signing key above.
+  local drop_secret=""
+  if [[ "$store" == "op" ]] && identity_exists "$name" && [[ "$(key_source "$name")" == "file" ]]; then
+    drop_secret=$(cfg_get "identity.$name.tokenfile" || cfg_get "identity.$name.keyfile" || true)
+  fi
+
   # --- store the secret (1Password or a local file), shred the source -------
   mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
   if [[ "$store" == "op" ]]; then
@@ -1917,6 +1924,10 @@ cmd_setup() {
   if [[ -n "$drop_sign" ]]; then
     say "==> commit signing is now off for identity '$name'"
     shred_signing_key "$drop_sign"
+  fi
+  if [[ -n "$drop_secret" && -f "$drop_secret" ]]; then
+    shred_file "$drop_secret"
+    say "    shredded $(display_path "$drop_secret"), now that the secret is in 1Password"
   fi
   mkdir -p "$base/$name"
   install_agent_docs "$base"
