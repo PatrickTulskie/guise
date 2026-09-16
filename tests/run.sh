@@ -387,6 +387,19 @@ expect_eq "re-running the app identity keeps 1Password" \
 expect_eq "re-running the user identity keeps its file store" \
   "$(cfg identity.$USER_IDENT.keysource)" "file"
 
+# Moving a file-stored secret into 1Password takes the file with it, but only
+# once the move has landed.
+OP_FAKE_FORBID=1 "$ROOT/bin/guise" setup --name "$USER_IDENT" --store op \
+  --op-account my.1password.com </dev/null >/dev/null 2>&1
+expect_eq "a move into an unreachable 1Password fails" "$?" "1"
+expect "and leaves the token file in place" test -f "$tokenfile"
+"$ROOT/bin/guise" setup --name "$USER_IDENT" --store op \
+  --op-account my.1password.com </dev/null >/dev/null 2>&1
+expect_eq "a move into 1Password exits 0" "$?" "0"
+expect "and shreds the file it moved out of" test ! -e "$tokenfile"
+expect_eq "with the token still reading back" \
+  "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_filestore"
+
 # --- identity naming + configurable default ----------------------------------
 echo "identity naming and default:"
 new_sandbox
