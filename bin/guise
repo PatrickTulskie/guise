@@ -1238,6 +1238,161 @@ wz_outro() { # identity
   wz_line "${WZ_DIM}└${WZ_OFF}  Happy building."
 }
 
+wz_ask_pem() {
+  local _ok=""
+  pem=""
+  while [[ -z "$_ok" ]]; do
+    wz_require pem "Path to the downloaded .pem"
+    case "$pem" in "~/"*) pem="$HOME/${pem#\~/}" ;; esac
+    if [[ ! -f "$pem" ]]; then wz_warn "nothing at $pem"
+    elif ! openssl pkey -in "$pem" -noout 2>/dev/null; then
+      wz_warn "$pem isn't a private key -- look for the .pem download, not the app page"
+    else _ok=1; fi
+  done
+  wz_bar "${WZ_DIM}The .pem gets shredded once its key is stored safely.${WZ_OFF}"
+}
+
+wz_ask_app_id() { # [default]
+  local _num_re='^[0-9]+$'
+  while [[ ! "$app_id" =~ $_num_re ]]; do
+    [[ -z "$app_id" ]] \
+      || wz_warn "the App ID is a number -- not the client ID, and not the app's name"
+    wz_require app_id "App ID (top of the app's settings page)" "${1:-}"
+  done
+}
+
+wz_install_app() {
+  wz_browser "Install the app on $owner" \
+    "App settings → Install App → $owner" \
+    "Pick All repositories, or just the ones the agent works in" \
+    "If a repo requires signed commits, add the app to its ruleset's bypass list" \
+    " Settings → Rules → Rulesets → Bypass list → Apps → Always"
+}
+
+wz_ask_token() {
+  wz_browser "Make a token for @$login" \
+    "Signed in as @$login, open $(wz_url "https://github.com/settings/tokens/new?scopes=repo&description=guise")" \
+    "That's a classic token with the repo scope already ticked -- it reaches" \
+    " any repo @$login is added to as a collaborator" \
+    "Expiration: whatever you'll actually rotate (doctor fails 30 days out)" \
+    "Generate it and copy the token -- GitHub only shows it once"
+  # Straight into a variable in this process: never in argv, and never
+  # written to disk on the way to being stored.
+  wz_secret wizard_token "Paste the token (it won't show)" \
+    || die "setup: no token on stdin"
+  [[ -n "$wizard_token" ]] || die "setup: empty token"
+}
+
+wz_ask_vault() {
+  command -v op >/dev/null \
+    || die "the 1Password CLI (op) is not installed -- re-run and choose a file"
+  while :; do
+    wz_require vault "Which 1Password vault?" "$vault"
+    if [[ -n "$op_account" ]]; then
+      op --account "$op_account" vault get "$vault" >/dev/null 2>&1 && break
+    else
+      op vault get "$vault" >/dev/null 2>&1 && break
+    fi
+    wz_warn "can't reach vault '$vault' -- sign in with 'op signin', or check the name"
+  done
+}
+
+wz_secret_noun() { if [[ "$kind" == "user" ]]; then echo token; else echo "private key"; fi; }
+
+# Walks an existing identity's settings with what it has now as every default,
+# so enter all the way through is a plain re-run. Its name, kind and account
+# stay put: those are `rename`, or a new identity.
+wz_edit_identity() { # identity
+  local _was=""
+  name="$1"
+  kind=$(identity_kind "$1")
+  require_deps "$kind"
+  op_account=$(cfg_get "identity.$1.opaccount" || true)
+
+  wz_section "$1"
+  if [[ "$kind" == "app" ]]; then
+    _was=$(cfg_get "identity.$1.owner" || true)
+    wz_require owner "Which account or org is it installed on?" "$_was"
+    [[ "$owner" == "$_was" ]] || wz_install_app
+    _was=$(cfg_get "identity.$1.appid" || true)
+    app_id=""
+    wz_ask_app_id "$_was"
+    # The stored key belongs to the App ID it was stored with.
+    if [[ "$app_id" != "$_was" ]] || wz_yes "Use a new private key?" n; then
+      wz_ask_pem
+    else
+      reuse="$1"
+    fi
+  else
+    login=$(cfg_get "identity.$1.login" || true)
+    wz_done "Account" "@$login"
+    if wz_yes "Paste a new token for @$login?" n; then wz_ask_token; fi
+    if signing_enabled "$1"; then _was=y; else _was=n; fi
+    if wz_yes "Sign @$login's commits?" "$_was"; then sign=1; else sign=0; fi
+  fi
+
+  _was=$(key_source "$1")
+  if [[ "$_was" == "op" ]]; then
+    if wz_yes "Keep the $(wz_secret_noun) in 1Password?" y; then store=op; else store=file; fi
+  elif command -v op >/dev/null; then
+    if wz_yes "Keep the $(wz_secret_noun) in a file on this machine?" y; then store=file; else store=op; fi
+  else
+    store=file
+  fi
+  if [[ "$store" == "op" ]]; then
+    _was=$(cfg_get "identity.$1.opitem" || true)
+    _was=${_was#op://}
+    [[ -z "$_was" ]] || vault=${_was%%/*}
+    wz_ask_vault
+  fi
+
+  if [[ "$(default_identity)" == "$1" ]]; then
+    wz_done "Default identity" "yes, already"
+  elif wz_yes "Make it your default identity?" n; then
+    make_default=1
+  fi
+}
+
+wz_review() {
+  wz_section "One last look"
+  if [[ "$kind" == "app" ]]; then
+    wz_row "App" "$app_id, installed on $owner"
+    if [[ -n "$reuse" && "$reuse" == "$name" ]]; then wz_row "Key" "keeping the stored one"
+    elif [[ -n "$reuse" ]]; then wz_row "Key" "reusing the one stored for $reuse"
+    else wz_row "Key" "$(display_path "$pem") ${WZ_DIM}(shredded once stored)${WZ_OFF}"; fi
+  else
+    wz_row "Account" "@$login"
+    if [[ -n "$token_file" ]]; then wz_row "Token" "$token_file ${WZ_DIM}(shredded once stored)${WZ_OFF}"
+    elif [[ -n "$wizard_token" ]]; then wz_row "Token" "the one you just pasted"
+    else wz_row "Token" "keeping the one already stored"; fi
+    if [[ "$sign" == "1" ]]; then wz_row "Signing" "on, with a key made on this machine"
+    else wz_row "Signing" "off"; fi
+  fi
+  if [[ "$store" == "op" ]]; then wz_row "Stored in" "1Password, vault $vault"
+  else wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")"; fi
+  wz_row "Identity" "${name:-$derived}"
+  if [[ -n "$base" ]]; then
+    wz_row "Clones in" "$(display_path "$base")/${name:-${login:-<app name>}}/"
+  else
+    wz_row "Clones in" "$(display_path "$(basedir "$name")")/$name/"
+  fi
+  if [[ -n "$make_default" || -z "$existing" || "$(default_identity)" == "$name" ]]; then
+    wz_row "Default" "yes"
+  else
+    wz_row "Default" "no, $(default_identity) stays"
+  fi
+  wz_bar
+  wz_bar "${WZ_DIM}Writes $(display_path "$CONFIG_DIR"), a few helpers in $(display_path "$BIN_DIR"),${WZ_OFF}"
+  wz_bar "${WZ_DIM}and one marked block in ~/.gitconfig.${WZ_OFF}"
+  wz_bar
+  if ! wz_yes "Look good?" y; then
+    wz_line "${WZ_DIM}└${WZ_OFF}  No worries -- nothing was written."
+    exit 1
+  fi
+  wz_line "${WZ_DIM}└${WZ_OFF}  On it."
+  wz_line ""
+}
+
 # Fills in the flags a flag-driven `setup` would have been given, then returns
 # and lets that one path do the work -- so there is one provisioning
 # implementation, and the wizard is only a way of answering it. Assigns to
@@ -1249,7 +1404,7 @@ wz_outro() { # identity
 # API -- and nothing has been written to disk by the time those calls run, so a
 # rejected credential means re-running, not repairing.
 wizard_setup() {
-  local existing="" choice="" reuse="" pem_ok="" human="" derived="" n="" count=""
+  local existing="" choice="" reuse="" human="" derived="" n="" count=""
   wz_init
   wz_intro
 
@@ -1257,7 +1412,7 @@ wizard_setup() {
   if [[ -n "$existing" ]]; then
     local menu=(new "Set up a new identity" "")
     for n in $existing; do
-      menu+=("$n" "Repair $n" "re-run setup with its saved settings")
+      menu+=("$n" "Review $n" "walk its settings, keeping whatever you don't change")
     done
     count=$(printf '%s\n' "$existing" | wc -l | tr -d ' ')
     wz_bar
@@ -1267,11 +1422,8 @@ wizard_setup() {
       wz_select choice "You already have $count identities set up. What's next?" "${menu[@]}"
     fi
     if [[ $WZ_INDEX -ne 0 ]]; then
-      # Every other answer is already in the config, and a re-run by name is
-      # the advertised repair action, so there is nothing left to ask.
-      name="$choice"
-      wz_line "${WZ_DIM}└${WZ_OFF}  Re-running setup for $choice with its saved settings."
-      wz_line ""
+      wz_edit_identity "$choice"
+      wz_review
       return 0
     fi
   fi
@@ -1299,11 +1451,7 @@ wizard_setup() {
     fi
     [[ -n "$owner" ]] || wz_require owner "Which account or org will it be installed on?"
     local num_re='^[0-9]+$'
-    while [[ ! "$app_id" =~ $num_re ]]; do
-      [[ -z "$app_id" ]] \
-        || wz_warn "the App ID is a number -- not the client ID, and not the app's name"
-      wz_require app_id "App ID (top of the app's settings page)"
-    done
+    [[ "$app_id" =~ $num_re ]] || wz_ask_app_id
 
     # A second installation of an app already set up needs no new key, which is
     # worth offering: the download is one-time-only on GitHub's side.
@@ -1315,25 +1463,8 @@ wizard_setup() {
         reuse=""
       fi
     fi
-    if [[ -z "$reuse" && -z "$pem" ]]; then
-      while :; do
-        wz_require pem "Path to the downloaded .pem"
-        case "$pem" in "~/"*) pem="$HOME/${pem#\~/}" ;; esac
-        pem_ok=""
-        if [[ ! -f "$pem" ]]; then wz_warn "nothing at $pem"
-        elif ! openssl pkey -in "$pem" -noout 2>/dev/null; then
-          wz_warn "$pem isn't a private key -- look for the .pem download, not the app page"
-        else pem_ok=1; fi
-        [[ -z "$pem_ok" ]] || break
-      done
-      wz_bar "${WZ_DIM}The .pem gets shredded once its key is stored safely.${WZ_OFF}"
-    fi
-
-    wz_browser "Install the app on $owner" \
-      "App settings → Install App → $owner" \
-      "Pick All repositories, or just the ones the agent works in" \
-      "If a repo requires signed commits, add the app to its ruleset's bypass list" \
-      " Settings → Rules → Rulesets → Bypass list → Apps → Always"
+    [[ -n "$reuse" || -n "$pem" ]] || wz_ask_pem
+    wz_install_app
   else
     if ! wz_yes "Does the agent have its own GitHub account yet?" y; then
       wz_browser "Make the agent an account" \
@@ -1351,24 +1482,13 @@ wizard_setup() {
       login=""
     done
 
-
     reuse=$(find_identity_by_login "$login") || reuse=""
     if [[ -n "$token_file" ]]; then
       wz_done "Token" "$token_file (from --token-file)"
     elif [[ -n "$reuse" ]] && wz_yes "A token for @$login is already stored. Reuse it?" y; then
       : # the main path finds it by login, exactly as a bare re-run does
     else
-      wz_browser "Make a token for @$login" \
-        "Signed in as @$login, open $(wz_url "https://github.com/settings/tokens/new?scopes=repo&description=guise")" \
-        "That's a classic token with the repo scope already ticked -- it reaches" \
-        " any repo @$login is added to as a collaborator" \
-        "Expiration: whatever you'll actually rotate (doctor fails 30 days out)" \
-        "Generate it and copy the token -- GitHub only shows it once"
-      # Straight into a variable in this process: never in argv, and never
-      # written to disk on the way to being stored.
-      wz_secret wizard_token "Paste the token (it won't show)" \
-        || die "setup: no token on stdin"
-      [[ -n "$wizard_token" ]] || die "setup: empty token"
+      wz_ask_token
     fi
   fi
 
@@ -1386,26 +1506,14 @@ wizard_setup() {
   if [[ -n "$store" ]]; then
     wz_done "Credential" "$store (from --store)"
   elif command -v op >/dev/null; then
-    wz_select store "Where should the $([[ "$kind" == "user" ]] && echo token || echo "private key") live?" \
+    wz_select store "Where should the $(wz_secret_noun) live?" \
       file "In a file on this machine" "recommended · mode 600 under $(display_path "$KEYS_DIR")" \
       op   "In 1Password" "read on demand · a locked vault pauses the agent"
   else
     store=file
     wz_done "Credential" "a file on this machine (no 1Password CLI found)"
   fi
-  if [[ "$store" == "op" ]]; then
-    command -v op >/dev/null \
-      || die "the 1Password CLI (op) is not installed -- re-run and choose a file"
-    while :; do
-      wz_require vault "Which 1Password vault?" "$vault"
-      if [[ -n "$op_account" ]]; then
-        op --account "$op_account" vault get "$vault" >/dev/null 2>&1 && break
-      else
-        op vault get "$vault" >/dev/null 2>&1 && break
-      fi
-      wz_warn "can't reach vault '$vault' -- sign in with 'op signin', or check the name"
-    done
-  fi
+  [[ "$store" != "op" ]] || wz_ask_vault
 
   wz_section "Where it lives"
   if [[ "$kind" == "user" ]]; then derived="$login"; else derived="named after the app"; fi
@@ -1426,35 +1534,7 @@ wizard_setup() {
     make_default=1
   fi
 
-  wz_section "One last look"
-  if [[ "$kind" == "app" ]]; then
-    wz_row "App" "$app_id, installed on $owner"
-    if [[ -n "$reuse" ]]; then wz_row "Key" "reusing the one stored for $reuse"
-    else wz_row "Key" "$(display_path "$pem") ${WZ_DIM}(shredded once stored)${WZ_OFF}"; fi
-  else
-    wz_row "Account" "@$login"
-    if [[ -n "$token_file" ]]; then wz_row "Token" "$token_file ${WZ_DIM}(shredded once stored)${WZ_OFF}"
-    elif [[ -n "$wizard_token" ]]; then wz_row "Token" "the one you just pasted"
-    else wz_row "Token" "reusing the one already stored"; fi
-    if [[ "$sign" == "1" ]]; then wz_row "Signing" "on, with a key made on this machine"
-    else wz_row "Signing" "off"; fi
-  fi
-  if [[ "$store" == "op" ]]; then wz_row "Stored in" "1Password, vault $vault"
-  else wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")"; fi
-  wz_row "Identity" "${name:-$derived}"
-  wz_row "Clones in" "$(display_path "$base")/${name:-${login:-<app name>}}/"
-  if [[ -n "$make_default" || -z "$existing" ]]; then wz_row "Default" "yes"
-  else wz_row "Default" "no, $(default_identity) stays"; fi
-  wz_bar
-  wz_bar "${WZ_DIM}Writes $(display_path "$CONFIG_DIR"), a few helpers in $(display_path "$BIN_DIR"),${WZ_OFF}"
-  wz_bar "${WZ_DIM}and one marked block in ~/.gitconfig.${WZ_OFF}"
-  wz_bar
-  if ! wz_yes "Look good?" y; then
-    wz_line "${WZ_DIM}└${WZ_OFF}  No worries -- nothing was written."
-    exit 1
-  fi
-  wz_line "${WZ_DIM}└${WZ_OFF}  On it."
-  wz_line ""
+  wz_review
 }
 
 # ---------------------------------------------------------------------------
