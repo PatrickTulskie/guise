@@ -1158,6 +1158,28 @@ expect_eq "--wizard with flags exits 0" "$?" "0"
 expect_eq "the flags are taken, not re-asked" "$(cfg identity.$APP_IDENT.appid)" "1111"
 expect_eq "including the store" "$(cfg identity.$APP_IDENT.keysource)" "file"
 
+# A dumb terminal is still a terminal, so a bare setup runs the wizard -- but
+# nothing it draws may need the cursor moved to take it back. util-linux and
+# BSD script disagree on where the command goes, and BSD script hands the pty
+# an EOF the moment its stdin closes -- so stdin is held open until the command
+# is done.
+in_pty() { # "command"
+  local done="$SB/pty.done"
+  mkfifo "$done"
+  { cat; read -r _ < "$done"; } | if script --version >/dev/null 2>&1; then
+    script -qec "$1; : > '$done'" /dev/null
+  else
+    script -q /dev/null bash -c "$1; : > '$done'"
+  fi
+  rm -f "$done"
+}
+new_sandbox
+printf 'app\ny\npatricktulskie\n1111\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
+  | TERM=dumb in_pty "'$ROOT/bin/guise' setup" > "$SB/dumb.out" 2>&1
+expect "a bare setup on a dumb terminal still runs the wizard" \
+  grep -q "Look good?" "$SB/dumb.out"
+expect_fail "without a single escape sequence" grep -q $'\033' "$SB/dumb.out"
+
 # The wizard is what a bare setup does *on a terminal*. With no terminal there
 # is nothing to ask, so the flag-driven refusal stands.
 new_sandbox

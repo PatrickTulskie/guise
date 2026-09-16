@@ -991,7 +991,9 @@ WZ_DIM="" WZ_BOLD="" WZ_CYAN="" WZ_GREEN="" WZ_YELLOW="" WZ_INV="" WZ_OFF=""
 
 wz_init() {
   local _num_re='^[0-9]+$'
-  if [[ -t 0 && -t 2 ]]; then
+  # A dumb terminal gets the line-at-a-time prompts a pipe does: every
+  # redraw moves the cursor, which it can't.
+  if [[ -t 0 && -t 2 && "${TERM:-dumb}" != "dumb" ]]; then
     WZ_TTY=1
     WZ_COLS=$(stty size </dev/tty 2>/dev/null | awk '{print $2}') || WZ_COLS=""
     [[ "$WZ_COLS" =~ $_num_re && "$WZ_COLS" -gt 0 ]] || WZ_COLS=80
