@@ -41,12 +41,15 @@ scripted installs and re-runs from a harness behave exactly as they always
 have. `--wizard` forces the questions, `--no-wizard` insists on flags.
 
 The questions only fill in the flags; one code path does the provisioning
-either way. What the guided path adds is the parts that aren't flags: it names
-the machine and home directory it is about to write to before it writes
-anything, prints the browser steps as a checklist and waits rather than
-pretending to automate them, and re-asks anything it can check locally — a
-non-numeric App ID, a path with no private key at it, a 1Password vault it
-can't reach — instead of failing at the end.
+either way. What the guided path adds is the parts that aren't flags: it leans
+toward a separate account with a classic token, a file store and signed
+commits, prints the browser steps as a
+checklist and waits rather than pretending to automate them, re-asks anything
+it can check locally — a non-numeric App ID, a path with no private key at it,
+a 1Password vault it can't reach — instead of failing at the end, and shows
+everything it is about to do for one last yes before it writes anything. With
+signing on, it waits for the key to show up on the account before running
+`doctor`.
 
 What it can't check locally is the credential itself: that takes the GitHub
 call `setup` already makes. Nothing has been written to disk by the time it
