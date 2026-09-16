@@ -1160,11 +1160,13 @@ expect_eq "including the store" "$(cfg identity.$APP_IDENT.keysource)" "file"
 
 # A dumb terminal is still a terminal, so a bare setup runs the wizard -- but
 # nothing it draws may need the cursor moved to take it back. util-linux and
-# BSD script disagree on where the command goes, and BSD script hands the pty
-# an EOF the moment its stdin closes -- so stdin is held open until the command
-# is done. A watchdog turns a stuck pty into a failure instead of a hung job.
+# BSD script disagree on where the command goes, and util-linux runs it with
+# $SHELL, which the sandbox points at a zsh that may not be installed. BSD
+# script hands the pty an EOF the moment its stdin closes, so stdin is held open
+# until the command is done. A watchdog turns a stuck pty into a failure
+# instead of a hung job.
 pty_script() {
-  if script --version >/dev/null 2>&1; then exec script -qec "$1" /dev/null
+  if script --version >/dev/null 2>&1; then SHELL=/bin/bash exec script -qec "$1" /dev/null
   else exec script -q /dev/null bash -c "$1"; fi
 }
 in_pty() { # "command" -- stdin is what gets typed
