@@ -51,6 +51,10 @@ everything it is about to do for one last yes before it writes anything. With
 signing on, it waits for the key to show up on the account before running
 `doctor`.
 
+Run it again with identities already set up and it offers to review one: its
+token or key, signing, store and default, each with its current value as the
+answer, so pressing enter through all of it changes nothing.
+
 What it can't check locally is the credential itself: that takes the GitHub
 call `setup` already makes. Nothing has been written to disk by the time it
 runs, so a rejected token or a wrong App ID costs you the questions again and

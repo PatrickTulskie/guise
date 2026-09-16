@@ -1118,22 +1118,28 @@ printf '%s\n' "$(awk '{print $1" "$2}' "$HOME/.config/guise/keys/$USER_IDENT.sig
 agent doctor >/dev/null 2>&1
 expect_eq "doctor passes on a guided account install" "$?" "0"
 
-# Re-running for an identity that exists asks which one and nothing else: every
-# other answer is already in the config, and a bare re-run is the documented
-# repair action.
+# Picking an existing identity walks its settings with what it has now as every
+# default: new token, signing, store, then the summary. Enter all the way through
+# is a plain re-run, and the answers that do change are the only changes.
 snap_guided=$(snapshot)
-printf '%s\n' "$USER_IDENT" | wizard >/dev/null 2>&1
-expect_eq "re-running an existing identity through the wizard exits 0" "$?" "0"
-expect_eq "and changes nothing" "$(snapshot)" "$snap_guided"
+printf '%s\n\n\n\n\n' "$USER_IDENT" | wizard >/dev/null 2>&1
+expect_eq "reviewing an existing identity through the wizard exits 0" "$?" "0"
+expect_eq "and entering through every answer changes nothing" "$(snapshot)" "$snap_guided"
+printf '%s\ny\nok\ngithub_pat_rotated\nn\n\n\n' "$USER_IDENT" | wizard >/dev/null 2>&1
+expect_eq "a changed answer exits 0" "$?" "0"
+expect_eq "a new token pasted during review is stored" \
+  "$(cat "$HOME/.config/guise/keys/$USER_IDENT.token")" "github_pat_rotated"
+expect_fail "and signing declined during review turns off" cfg identity.$USER_IDENT.signing
+expect_eq "while the store it didn't touch stays put" "$(cfg identity.$USER_IDENT.keysource)" "file"
 
-# The same re-run, but for an app identity -- whose owner and App ID cmd_setup
-# needs and the config already holds.
+# The same review, but for an app identity: owner, App ID, new key, store,
+# summary.
 new_sandbox
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 snap_app=$(snapshot)
-printf '%s\n' "$APP_IDENT" | wizard >/dev/null 2>&1
-expect_eq "re-running an app identity through the wizard exits 0" "$?" "0"
-expect_eq "without asking for the owner and App ID again" "$(snapshot)" "$snap_app"
+printf '%s\n\n\n\n\n\n' "$APP_IDENT" | wizard >/dev/null 2>&1
+expect_eq "reviewing an app identity through the wizard exits 0" "$?" "0"
+expect_eq "offers its owner and App ID back rather than asking afresh" "$(snapshot)" "$snap_app"
 expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1111"
 
 
