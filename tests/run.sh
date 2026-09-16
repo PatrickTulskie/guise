@@ -1153,6 +1153,10 @@ snap_app=$(snapshot)
 printf '%s\n\n\n\n\n\n' "$APP_IDENT" | wizard >/dev/null 2>&1
 expect_eq "reviewing an app identity through the wizard exits 0" "$?" "0"
 expect_eq "offers its owner and App ID back rather than asking afresh" "$(snapshot)" "$snap_app"
+agent basedir "$HOME/work" --name "$APP_IDENT" >/dev/null 2>&1
+printf '%s\n\n\n\n\n\n' "$APP_IDENT" | wizard >/dev/null 2>&1
+expect "a review leaves a moved workspace where it is" test -d "$HOME/work/$APP_IDENT"
+expect "without recreating it under the shared one" test ! -e "$HOME/agentic-code/$APP_IDENT"
 expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1111"
 
 
