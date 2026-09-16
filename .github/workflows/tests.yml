@@ -1,9 +1,8 @@
 name: Tests
 
+# Every PR, whatever its base, so a PR stacked on another still runs.
 on:
   pull_request:
-    branches:
-      - main
   push:
     branches:
       - main
