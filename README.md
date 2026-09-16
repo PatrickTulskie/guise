@@ -26,7 +26,7 @@ you.
 Know the flags already? Pass them and the questions don't happen:
 
 ```bash
-./bin/guise setup --kind user --login your-agent-account
+./bin/guise setup --login your-agent-account
 ```
 
 `setup` prompts for the PAT — there is deliberately no `--token` flag, since
@@ -56,7 +56,7 @@ nothing else.
 ## Introduction
 
 Gives your coding agents (Claude Code, Cursor) their own GitHub identity. Agent
-commits land as `your-app[bot]` with you as co-author, instead of impersonating
+commits land as the agent's account (or `your-app[bot]`) with you as co-author, instead of impersonating
 you — and the credit is yours rather than the tool's, since a commit hook clears
 the `Co-Authored-By` a harness stamps for itself. A co-author naming anyone else
 is real credit and is left alone. Commits the identity only replays — a
@@ -65,14 +65,86 @@ Everything is scoped to one directory — `~/agentic-code/` out of the box, and
 [movable per identity](#where-the-clones-live) — and your own git identity is
 never touched.
 
-That identity can be a **GitHub App bot** (below — the better default) or a
-**[separate GitHub account](#a-separate-github-account-instead-of-an-app)**.
-Both kinds can coexist, one per subdirectory.
+That identity is a **[separate GitHub account](#setting-up-a-separate-github-account)**
+by default — the better fit for open source — or a
+**[GitHub App bot](#a-github-app-bot-instead)**. Both kinds can coexist, one per
+subdirectory.
 
 The tool is tested on macOS and Linux, and stays compatible with the bash 3.2
 that ships with macOS.
 
-## Setting up a GitHub App bot
+## Setting up a separate GitHub account
+
+A dedicated account can be invited to any repo, which is what you want for open
+source you don't control.
+
+**1. Create the account** — a normal GitHub signup with its own email address.
+GitHub's terms allow one machine account per person alongside your own.
+
+**2. Give it access** — add it as a collaborator on the repos it should work
+in, then accept the invite *signed in as that account*. Its own forks need
+nothing.
+
+**3. Issue a classic PAT** *while signed in as that account* —
+[github.com/settings/tokens/new](https://github.com/settings/tokens/new?scopes=repo&description=guise)
+opens with the `repo` scope ticked:
+
+- Scope: `repo`, which reaches every repo the account can push to
+- Expiration: whatever you'll actually rotate — `doctor` starts failing 30
+  days out
+
+A fine-grained token works too, if you'd rather limit it to certain repos. It
+only reaches repos owned by the **resource owner** it was issued for, though,
+and GitHub offers an org there only when the account is a *member* — as an
+outside collaborator it can only scope a token to itself, which reaches
+nothing the org owns.
+
+Then hand the token to setup as a file, never as a flag value (flags land in
+`ps` output and shell history):
+
+```bash
+pbpaste > /tmp/pat
+./bin/guise setup --token-file /tmp/pat
+```
+
+Setup calls `GET /user` to discover the account's login and numeric user ID,
+**refuses the token if it belongs to your own account**, stores it (in a file
+by default, or `--store op`), and shreds `/tmp/pat`. The identity is named
+after the account, so commits under `~/agentic-code/<login>/` are authored by
+it, still with you as co-author. Helper binaries land in `~/.local/bin`, and
+setup drops an `AGENTS.md` (and a `CLAUDE.md` importing it) into
+`~/agentic-code/` telling harnesses to use `guise-gh` — harnesses that stack
+context files up the directory tree pick it up for every repo underneath; it
+never overwrites your edits. It finishes by running `doctor`, which verifies
+the whole chain.
+
+Requires: `gh`, `jq`, and `git`, plus `op` (1Password CLI, signed in) if you
+use `--store op`.
+
+An invite nobody accepted, or a token missing its scope, looks fine to every
+other check and only surfaces as a 403 at clone time, so `doctor` verifies the
+token reaches at least one repository — see
+[troubleshooting](docs/troubleshooting.md).
+
+Re-running setup for that identity without `--token-file` reuses the stored
+token, so it's safe to re-run any time. Rotating is the same command with a
+fresh `--token-file`.
+
+### Key storage: a plain file or 1Password
+
+By default the secret — an App's private key, or an account's PAT — is kept
+under `~/.config/guise/keys/` (mode 600). It deliberately does *not* live in
+`~/agentic-code/`: agents roam that directory and must not be able to read or
+accidentally commit it.
+
+Pass `--store op` to keep it in 1Password instead, read on demand. The secret
+never touches disk that way, but a locked vault blocks the agent until you
+unlock it.
+
+## A GitHub App bot instead
+
+An App's installation token only works on repos where the app is installed, and
+it can't sign commits — but there is no standing credential to steal or rotate.
 
 ### One-time GitHub setup (two browser steps)
 
@@ -107,87 +179,16 @@ Apps → mode Always), or the first push will be rejected.
 ```
 
 What happens: the App's metadata (slug, installation ID, bot user ID) is
-discovered from the API, credentials go into 1Password, the PEM is shredded,
-helper binaries land in `~/.local/bin`, and a directory-scoped git identity is
-wired up for `~/agentic-code/patricktulskie-agent/` — named after the agent
-itself, not a generic slot. Setup also drops an `AGENTS.md` (and a
-`CLAUDE.md` importing it) into `~/agentic-code/` telling harnesses to use
-`guise-gh` — harnesses that stack context files up the directory tree pick it
-up for every repo underneath; it never overwrites your edits. It finishes by
-running `doctor`, which verifies the whole chain. Safe to re-run any time.
-
-Requires: `gh`, `jq`, `openssl`, `git`, and `op` (1Password CLI, signed in)
-unless you use `--store file`.
-
-### Key storage: 1Password or a plain file
-
-By default the secret — an App's private key, or an account's PAT — lives in
-1Password and is read on demand, which means a locked vault blocks the agent.
-For agents that run unattended, pass `--store file` and it is kept under
-`~/.config/guise/keys/` (mode 600) instead — no 1Password involved at use
-time. It deliberately does *not* live in `~/agentic-code/`: agents roam that
-directory and must not be able to read or accidentally commit it.
+discovered from the API, the private key is stored, the PEM is shredded, and a
+directory-scoped git identity is wired up for
+`~/agentic-code/patricktulskie-agent/` — named after the agent itself, not a
+generic slot. The rest matches an account setup, plus `openssl` on top of its
+requirements. Safe to re-run any time.
 
 ### The PEM is only needed once per app
 
 Adding another identity for an app you've already set up (a second
 installation, say) reuses the stored key — just omit `--pem`.
-
-## A separate GitHub account (instead of an app)
-
-An App's installation token only works on repos where the app is installed. A
-dedicated account can be given access anywhere, which is what you want for repos
-you don't control — with one caveat about how its token gets scoped, in step 2.
-
-**1. Create the account** — a normal GitHub signup with its own email address.
-GitHub's terms allow one machine account per person alongside your own.
-
-**2. Give it access to the repos — as an org *member*, not an outside
-collaborator.** This ordering matters: a fine-grained PAT can only reach repos
-owned by the **resource owner** it was issued for, and the resource-owner picker
-lists an org only if the account is a member of it. An account added as an
-outside collaborator can therefore only issue a token scoped to *itself*, which
-reaches nothing the org owns — even with write access to the repo. Add it to a
-team; that costs a seat in a paid org.
-
-If you can't add it as a member, a **classic** PAT with the `repo` scope honors
-outside-collaborator access without membership or a seat. The tradeoff is
-reach: `repo` is all-or-nothing, so there's no per-repo selection.
-
-**3. Issue a fine-grained PAT** *while signed in as that account* — Settings →
-Developer settings → Personal access tokens → Fine-grained tokens:
-
-- Resource owner: whoever **owns** the repos the agent will work in — the org,
-  not the agent account, for anything org-owned
-- Repository access: only the repos the agent should work in
-- Repository permissions: Contents **R/W**, Pull requests **R/W**, Issues
-  **R/W** (Metadata read comes along automatically)
-- Expiration: whatever you'll actually rotate — `doctor` starts failing 30
-  days out
-
-Then hand the token to setup as a file, never as a flag value (flags land in
-`ps` output and shell history):
-
-```bash
-pbpaste > /tmp/pat
-./bin/guise setup --kind user --token-file /tmp/pat
-```
-
-Setup calls `GET /user` to discover the account's login and numeric user ID,
-**refuses the token if it belongs to your own account**, stores it (1Password
-by default, or `--store file`), and shreds `/tmp/pat`. The identity is named
-after the account, so commits under `~/agentic-code/<login>/` are authored by
-it, still with you as co-author.
-
-Org policy may require an owner to approve the token before it works, and a
-pending token is indistinguishable from a working one at the agent's end. Both
-that and a self-scoped token look fine to every other check and only surface as
-a 403 at clone time, so `doctor` verifies the token reaches at least one
-repository — see [troubleshooting](docs/troubleshooting.md).
-
-Re-running setup for that identity without `--token-file` reuses the stored
-token, so it's safe to re-run any time. Rotating is the same command with a
-fresh `--token-file`.
 
 ### Which one to use
 
@@ -199,9 +200,9 @@ fresh `--token-file`.
 | Seat in a paid org | free | consumes one |
 | Rotation | automatic | manual, before the PAT expires |
 
-The app is the better default — nothing standing to steal, no rotation to
-remember. Reach for an account when the agent needs to work on repos you can't
-install an app on.
+For open source, the account is the better fit: anyone can invite it, and its
+commits can show up Verified. Reach for an app when you control the repos and
+want nothing standing to steal and no rotation to remember.
 
 ## Signed commits
 
@@ -209,7 +210,7 @@ Repos and orgs increasingly require signed commits. A separate GitHub account is
 a real account, so it can hold a signing key of its own:
 
 ```bash
-guise setup --kind user --login your-agent-account --sign
+guise setup --login your-agent-account --sign
 ```
 
 That generates an ed25519 key at `~/.config/guise/keys/<identity>.signing`
@@ -225,13 +226,13 @@ says so.
 
 ### Why that step is manual
 
-Registering a signing key needs an account-level permission that a fine-grained
-PAT cannot carry, so there is no credential that could do it for you. That also
-means the whole signing path touches no secret at all: the one GitHub call
+Registering a signing key takes a scope (`write:ssh_signing_key`) that guise
+never asks the token for, so it stays a browser step. That also means the whole
+signing path touches no secret at all: the one GitHub call
 `guise` makes here is an unauthenticated read of the account's public key
 list, to check whether the key is already up there.
 
-The key itself is deliberately the one thing not kept in 1Password. It grants
+The key itself never goes into 1Password, even for a `--store op` identity. It grants
 nothing, it never authenticates anything (`namespaces="git"` limits it to
 commits and tags), and replacing it costs one command — so syncing it would only
 widen where it can leak from.
@@ -244,7 +245,7 @@ the one registered on the account:
 
 ```bash
 rm ~/.config/guise/keys/<identity>.signing*
-guise setup --kind user --login your-agent-account --sign
+guise setup --login your-agent-account --sign
 ```
 
 `--no-sign` turns it back off, shreds the local private half, and reminds you to
@@ -393,7 +394,7 @@ guise setup --owner patricktulskie --app-id 67890 --pem ~/Downloads/other.pem --
 Kinds mix freely — an app bot in one subdirectory, an account in another:
 
 ```bash
-guise setup --kind user --token-file /tmp/pat --name oss
+guise setup --token-file /tmp/pat --name oss
 guise clone someone/their-repo --name oss     # → ~/agentic-code/oss/
 ```
 
@@ -428,7 +429,7 @@ source work that means one of:
   setting above makes this possible),
 - you fork, install the app on your own fork, push there as the bot, and open
   the PR from the fork, or
-- you use a [separate account](#a-separate-github-account-instead-of-an-app),
+- you use a [separate account](#setting-up-a-separate-github-account),
   which needs no installation on either side.
 
 ## Trying it without touching your machine

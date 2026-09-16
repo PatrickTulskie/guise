@@ -94,7 +94,7 @@ expect "no config was needed to answer" test ! -e "$HOME/.config/guise/config"
 # --- setup provisions everything --------------------------------------------
 echo "setup:"
 new_sandbox
-run_setup --pem "$SB/key.pem" >/dev/null 2>&1
+run_setup --store op --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "setup exits 0" "$?" "0"
 expect "config file written" test -f "$HOME/.config/guise/config"
 expect_eq "slug discovered from API" "$(cfg identity.$APP_IDENT.slug)" "test-agent"
@@ -122,6 +122,10 @@ snap1=$(snapshot)
 echo "custom rules" > "$HOME/agentic-code/AGENTS.md"
 run_setup >/dev/null 2>&1
 expect_eq "re-run without --pem exits 0" "$?" "0"
+"$ROOT/bin/guise" setup --name "$APP_IDENT" </dev/null >/dev/null 2>&1
+expect_eq "a re-run by name alone finds the app's owner and App ID" "$?" "0"
+"$ROOT/bin/guise" setup </dev/null >/dev/null 2>&1
+expect_eq "and so does a bare re-run of the default" "$?" "0"
 expect_eq "re-run changes no artifact" "$(snapshot)" "$snap1"
 expect_eq "still exactly one marker block" \
   "$(grep -cF '# >>> guise >>>' "$HOME/.gitconfig")" "1"
@@ -133,14 +137,14 @@ expect_eq "edited AGENTS.md not overwritten" \
 # --- second identity ---------------------------------------------------------
 echo "multiple identities:"
 openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
-run_setup --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
+run_setup --store op --name platform --pem "$SB/key2.pem" >/dev/null 2>&1
 expect_eq "second identity setup exits 0" "$?" "0"
 expect_eq "two includeIf blocks in owned gitconfig" \
   "$(grep -c includeIf "$HOME/.config/guise/gitconfig")" "2"
 expect_eq "~/.gitconfig untouched by second identity" \
   "$(grep -cF '# >>> guise >>>' "$HOME/.gitconfig")" "1"
 expect "platform dir created" test -d "$HOME/agentic-code/platform"
-run_setup --name reused >/dev/null 2>&1
+run_setup --store op --name reused >/dev/null 2>&1
 expect_eq "new identity without --pem reuses the stored key" "$?" "0"
 expect_eq "reused identity fully discovered" "$(cfg identity.reused.installationid)" "2222"
 
@@ -292,9 +296,9 @@ expect "uninstall removes rendered git dir" test ! -e "$HOME/.config/guise/git"
 echo "user account identity:"
 new_sandbox
 printf 'github_pat_stub123\n' > "$SB/pat.txt"
-"$ROOT/bin/guise" setup --kind user --token-file "$SB/pat.txt" \
+"$ROOT/bin/guise" setup --store op --token-file "$SB/pat.txt" \
   --op-account my.1password.com </dev/null >/dev/null 2>&1
-expect_eq "user setup exits 0" "$?" "0"
+expect_eq "setup with no app flags sets up an account" "$?" "0"
 expect_eq "kind recorded" "$(cfg identity.$USER_IDENT.kind)" "user"
 expect_eq "login discovered from the token" "$(cfg identity.$USER_IDENT.login)" "patrick-agent"
 expect_eq "user id discovered" "$(cfg identity.$USER_IDENT.userid)" "4444"
@@ -326,7 +330,7 @@ expect_eq "doctor passes again once the PAT reaches a repo" "$?" "0"
 expect_eq "re-run without --token-file reuses the stored token" "$?" "0"
 
 # App and user identities have to coexist: they share basedir and ~/.gitconfig.
-run_setup --name bot --pem "$SB/key.pem" >/dev/null 2>&1
+run_setup --store op --name bot --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "app identity alongside a user identity" "$?" "0"
 expect_eq "both identities in the owned gitconfig" \
   "$(grep -c includeIf "$HOME/.config/guise/gitconfig")" "2"
@@ -369,15 +373,13 @@ FAKE_STAT_GNU=1 "$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor reads token permissions with GNU stat semantics" "$?" "0"
 
 # The store is settled only after the identity name is, so an unrelated
-# file-store default can't quietly route a new App's private key to disk.
-run_setup --pem "$SB/key.pem" >/dev/null 2>&1
-expect_eq "app setup alongside a file-store default exits 0" "$?" "0"
-expect_eq "new identity does not inherit the default's file store" \
-  "$(cfg identity.$APP_IDENT.keysource)" "op"
-expect "new identity's key went to 1Password" \
-  test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
-expect "new identity's key not written to disk" \
-  test ! -e "$HOME/.config/guise/keys/$APP_IDENT.pem"
+# 1Password default can't quietly route a new identity's secret into a vault.
+run_setup --store op --default --pem "$SB/key.pem" >/dev/null 2>&1
+expect_eq "app setup into 1Password as the default exits 0" "$?" "0"
+run_setup --name third >/dev/null 2>&1
+expect_eq "new identity does not inherit the default's 1Password store" \
+  "$(cfg identity.third.keysource)" "file"
+expect "new identity's key written to disk" test -f "$HOME/.config/guise/keys/third.pem"
 run_setup >/dev/null 2>&1
 expect_eq "re-running the app identity keeps 1Password" \
   "$(cfg identity.$APP_IDENT.keysource)" "op"
@@ -980,7 +982,7 @@ expect_eq "doctor passes with signing off again" "$?" "0"
 # the token comes from a file, but storing it needs 1Password.
 echo "a --no-sign that dies partway:"
 new_token_file "$SB/pat3.txt"
-run_setup_user --name opsign --sign --token-file "$SB/pat3.txt" >/dev/null 2>&1
+run_setup_user --name opsign --store op --sign --token-file "$SB/pat3.txt" >/dev/null 2>&1
 opkey="$HOME/.config/guise/keys/opsign.signing"
 expect "an op-store identity gets a signing key too" test -f "$opkey"
 new_token_file "$SB/pat4.txt"
@@ -1262,7 +1264,7 @@ new_sandbox
 printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
 cp "$HOME/.gitconfig" "$SB/gitconfig.pre"
 cp "$HOME/.zshrc" "$SB/zshrc.pre"
-run_setup --pem "$SB/key.pem" >/dev/null 2>&1
+run_setup --store op --pem "$SB/key.pem" >/dev/null 2>&1
 "$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
 expect_eq "uninstall exits 0" "$?" "0"
 expect "~/.gitconfig byte-identical to pre-setup" cmp -s "$HOME/.gitconfig" "$SB/gitconfig.pre"
