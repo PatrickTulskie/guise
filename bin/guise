@@ -1929,12 +1929,12 @@ cmd_setup() {
     shred_file "$drop_secret"
     say "    shredded $(display_path "$drop_secret"), now that the secret is in 1Password"
   fi
-  mkdir -p "$base/$name"
-  install_agent_docs "$base"
+  mkdir -p "$(identity_dir "$name")"
+  install_agent_docs "$(basedir "$name")"
 
   say "==> setup complete for identity '$name'"
   [[ -z "$want_sign" ]] || say "    commits are SSH-signed with $sign_key"
-  say "    agent clones go in $base/$name/ (use 'guise clone <owner/repo>')"
+  say "    agent clones go in $(identity_dir "$name")/ (use 'guise clone <owner/repo>')"
   say "    default identity: $(default_identity)"
   if rc_path=$(shell_rc); then
     say "    'guise use' cds this shell once $(display_path "$rc_path") is reloaded"
