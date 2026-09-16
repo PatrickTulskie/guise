@@ -927,9 +927,9 @@ generate_signing_key() { # <path> <comment>
   chmod 600 "$path"
 }
 
-# Registering a key needs an account-level permission a fine-grained PAT cannot
-# carry, so this asks rather than tries. The only GitHub call in the signing
-# path is the unauthenticated read below.
+# Registering a key takes a scope (write:ssh_signing_key) the token is never
+# asked to carry, so this asks rather than tries. The only GitHub call in the
+# signing path is the unauthenticated read below.
 announce_signing_key() { # <login> <public key file>
   local login="$1" body
   body=$(pubkey_body "$2")
@@ -1328,25 +1328,28 @@ cmd_setup() {
   [[ -z "$store" || "$store" == "op" || "$store" == "file" ]] \
     || die "--store must be 'op' or 'file', got '$store'"
 
-  # Re-running setup for an existing identity keeps its kind unless told
-  # otherwise; with no name there is nothing to look up, so apps win the tie.
-  if [[ -z "$kind" ]]; then
-    if [[ -n "$name" ]]; then kind=$(identity_kind "$name"); else kind="app"; fi
-  fi
-
-  # Whose stored secret a bare re-run may reuse: the named identity, or the
+  # Whose stored settings a re-run may reuse: the named identity, or the
   # default when no name was given (which is the one it would derive anyway).
   local probe="$name"
   [[ -n "$probe" ]] || probe=$(default_identity)
 
+  # Flags for one kind mean that kind, and re-running setup for an existing
+  # identity keeps its kind; anything else is an account.
+  if [[ -z "$kind" ]]; then
+    if [[ -n "$owner$app_id$pem" ]]; then kind="app"
+    elif [[ -n "$login$token_file" ]]; then kind="user"
+    elif identity_exists "$probe"; then kind=$(identity_kind "$probe")
+    else kind="user"; fi
+  fi
+
   [[ "$kind" == "app" || "$kind" == "user" ]] || die "--kind must be 'app' or 'user', got '$kind'"
   if [[ "$kind" == "user" ]]; then
     [[ -z "$owner$app_id$pem" ]] \
-      || die "--owner/--app-id/--pem are app-only; --kind user takes --login and --token-file"
+      || die "--owner/--app-id/--pem are app-only; an account identity takes --login and --token-file"
   else
-    [[ -z "$login$token_file" ]] || die "--login/--token-file require --kind user"
+    [[ -z "$login$token_file" ]] || die "--login/--token-file are for an account identity, not an app"
     [[ "$sign" != "1" ]] \
-      || die "--sign applies to --kind user -- a foo[bot] account has no settings page to register a signing key on"
+      || die "--sign is for account identities -- a foo[bot] account has no settings page to register a signing key on"
   fi
 
   require_deps "$kind"
@@ -1430,6 +1433,10 @@ cmd_setup() {
     op_title="$login"
     secret_path="$KEYS_DIR/$name.token"
   else
+    if [[ "$(identity_kind "$probe")" == "app" ]] && identity_exists "$probe"; then
+      [[ -n "$owner" ]]  || owner=$(cfg_get "identity.$probe.owner" || true)
+      [[ -n "$app_id" ]] || app_id=$(cfg_get "identity.$probe.appid" || true)
+    fi
     [[ -n "$owner" ]]  || ask owner "GitHub account (user or org) the app is installed on"
     [[ -n "$app_id" ]] || ask app_id "App ID (top of the app settings page)"
     local num_re='^[0-9]+$'
@@ -1505,11 +1512,11 @@ cmd_setup() {
 
   # Deferred until the name is settled: an explicit --store wins, an existing
   # identity keeps the store it already uses (re-running setup is the advertised
-  # repair action, so it must not move a secret), and anything new goes to
-  # 1Password. Deciding any earlier would make a new identity inherit the store
-  # of whatever unrelated identity happened to be the default.
+  # repair action, so it must not move a secret), and anything new goes to a
+  # file. Deciding any earlier would make a new identity inherit the store of
+  # whatever unrelated identity happened to be the default.
   if [[ -z "$store" ]]; then
-    if identity_exists "$name"; then store=$(key_source "$name"); else store="op"; fi
+    if identity_exists "$name"; then store=$(key_source "$name"); else store="file"; fi
   fi
 
   # --- commit signing -------------------------------------------------------
@@ -1772,9 +1779,8 @@ chk_user_real() {
 
 # A credential can be entirely valid and still reach zero repositories, which
 # otherwise surfaces only as a 403 "Write access to repository not granted" at
-# clone time. For an account: a fine-grained PAT reaches only repos owned by its
-# resource owner, and the picker offers an org only if the account is a MEMBER,
-# so an outside collaborator can scope a token to itself and nothing else.
+# clone time. For an account: an invite not yet accepted, a token missing the
+# repo scope, or a fine-grained token scoped to the account itself.
 # For an app: it may be installed on no repositories.
 chk_reaches_repo() {
   local n
@@ -1932,11 +1938,11 @@ cmd_doctor() {
       check "token valid and still @$(cfg_get "identity.$name.login")" \
             "token revoked, expired, or replaced with one for another account -- re-run setup" chk_user_real "$name"
       check "token not expiring within 30 days" \
-            "issue a new PAT and re-run 'guise setup --kind user --name $name --token-file <path>'" chk_token_fresh "$name"
+            "issue a new PAT and re-run 'guise setup --name $name --token-file <path>'" chk_token_fresh "$name"
       check "agent account is not your own account" \
             "this identity holds a token for YOUR account -- issue one from the agent account" chk_not_human "$name"
       check "token reaches at least one repository" \
-            "the PAT's resource owner is probably the agent account itself -- the org only appears in the picker if the account is an org MEMBER, not an outside collaborator (docs/troubleshooting.md)" chk_reaches_repo "$name"
+            "add @$(cfg_get "identity.$name.login" || true) as a collaborator and accept the invite as that account, and check the token has the 'repo' scope (docs/troubleshooting.md)" chk_reaches_repo "$name"
       check "account email well-formed" \
             "re-run setup; email must be <userId>+<login>@users.noreply.github.com" chk_email_format "$name"
     else
@@ -2439,23 +2445,24 @@ guise $VERSION -- a dedicated GitHub identity for coding harnesses
 usage: guise <command> [flags]
 
   setup      provision an identity (idempotent; safe to re-run)
-             GitHub App bot (default):
-               --owner <account> --app-id <id> [--pem <path>]
-               --pem is only needed the first time per app; later identities
-               of the same app reuse the stored key
-             Separate GitHub account:
-               --kind user [--login <account>] [--token-file <path>]
+             Separate GitHub account (default):
+               [--login <account>] [--token-file <path>]
                the token file is shredded after storing; with neither flag
                setup reuses a stored token or prompts (never via argv)
                [--sign | --no-sign]  SSH-sign this identity's commits with a
                                      key of its own (app identities can't)
+             GitHub App bot (implied by any of its flags, or --kind app):
+               --owner <account> --app-id <id> [--pem <path>]
+               --pem is only needed the first time per app; later identities
+               of the same app reuse the stored key
              common:
                [--name <identity>]  default: the app slug / account login
                [--default]          make this the default identity
-               [--store <op|file>]  op: secret in 1Password (default for a
-                                        new identity)
-                                    file: secret on disk, no 1Password
-                                          (unattended use)
+               [--store <file|op>]  file: secret on disk, mode 600 (default
+                                          for a new identity)
+                                    op: secret in 1Password, read on
+                                        demand; a locked vault blocks
+                                        the agent
                                     re-running setup keeps the store the
                                     identity already uses
                [--vault <1password vault>] [--op-account <1password account>]

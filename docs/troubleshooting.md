@@ -86,7 +86,7 @@ signing.
 For a **separate GitHub account**, give it a key of its own:
 
 ```bash
-guise setup --kind user --login <agent-login> --sign
+guise setup --login <agent-login> --sign
 ```
 
 That generates an SSH signing key, switches the scoped config to
@@ -114,8 +114,8 @@ Signed in **as the agent account**, go to github.com/settings/ssh/new, set
 **Key type: Signing Key** — not Authentication Key; they are separate lists, and
 an authentication key verifies nothing — and paste
 `~/.config/guise/keys/<identity>.signing.pub`. This step is always manual:
-registering a signing key needs an account-level permission that a fine-grained
-PAT cannot carry. Re-running `guise setup --sign` prints the key again if you
+registering a signing key takes a scope (`write:ssh_signing_key`) guise never
+asks the token for. Re-running `guise setup --sign` prints the key again if you
 need it.
 
 GitHub also matches the signature against the account owning the commit email,
@@ -126,12 +126,11 @@ unlinked name*, above.
 
 `doctor` fails on "token valid and still @`<login>`" when the PAT no longer
 works, and on "token not expiring within 30 days" while there is still time.
-Both are fixed the same way — issue a fresh fine-grained PAT from the agent
-account and re-run setup for that identity:
+Both are fixed the same way — issue a fresh PAT from the agent account and re-run setup for that identity:
 
 ```bash
 pbpaste > /tmp/pat
-guise setup --kind user --name <identity> --token-file /tmp/pat
+guise setup --name <identity> --token-file /tmp/pat
 ```
 
 The git wiring and the identity's directory are untouched; only the stored
@@ -145,25 +144,19 @@ every other check passes — which is what makes this one confusing. `doctor`
 catches it with "token reaches at least one repository" (account identities) or
 "installation reaches at least one repository" (apps).
 
-For an account identity there are two causes, and they look identical from the
-agent's side:
+For an account identity, the usual causes:
 
-- **The token is scoped to the agent account itself.** A fine-grained PAT only
-  reaches repos owned by its *resource owner*, and the resource-owner picker
-  lists an org only if the account is a **member** of it. An account added as an
-  outside collaborator can't pick the org, so its token is self-scoped and
-  reaches nothing org-owned — write access on the repo doesn't change that.
-- **The token is waiting on org approval.** An org can require an owner to
-  approve fine-grained tokens; until that happens the token behaves as if the
-  org weren't there.
-
-Tell them apart on the token's own settings page — signed in as the agent
-account, Settings → Developer settings → Personal access tokens →
-Fine-grained tokens → the token. It names its resource owner, and shows an
-approval-pending banner while an owner still has to act. If the resource owner
-is the agent account, add the account to the org as a member and issue a fresh
-token (or use a classic PAT with `repo` scope — see the README). If it's
-pending, ask an owner to approve it.
+- **The invite was never accepted.** Being added as a collaborator does nothing
+  until the account accepts — signed in as the agent account, check
+  github.com/notifications or the repo's invitation link.
+- **The classic token is missing the `repo` scope.** Signed in as the agent
+  account, Settings → Developer settings → Personal access tokens → Tokens
+  (classic) → the token lists its scopes. Tick `repo` and regenerate.
+- **A fine-grained token is scoped to the agent account itself.** It only
+  reaches repos owned by its *resource owner*, and GitHub offers an org there
+  only if the account is a **member**, so an outside collaborator's token
+  reaches nothing the org owns. An org can also hold fine-grained tokens for
+  owner approval. Either way, a classic token with `repo` sidesteps both.
 
 To check what a credential reaches without waiting for a clone (the token goes
 through a config file on a pipe, never `-H`, so it stays out of `ps`):
@@ -201,7 +194,7 @@ environment (e.g. `GH_TOKEN=$(guise token)`), that copy *will* expire;
 use `guise-gh`, which mints fresh per invocation, instead of exporting.
 
 If minting itself fails: `guise token` prints the error. Usual causes are
-1Password locked (`op signin`; doesn't apply to `--store file` identities),
+1Password locked (`op signin`; only for `--store op` identities),
 the app uninstalled, or a rotated private key (re-run `setup --pem` with the
 new download).
 
