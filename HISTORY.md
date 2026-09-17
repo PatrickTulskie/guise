@@ -1,3 +1,14 @@
+## 0.2.1
+
+### Added
+
+* Re-running the wizard for an existing identity starts from its current values (#17)
+
+### Fixed
+
+* An identity's secret file is shredded once it moves into 1Password (#17)
+* A re-run creates the identity's directory where its basedir points, instead of duplicating a moved workspace (#17)
+
 ## 0.2.0
 
 ### Breaking Changes
