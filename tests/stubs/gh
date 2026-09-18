@@ -6,7 +6,7 @@ set -euo pipefail
 # Not a gh subcommand: reports the token guise-gh handed it, which is the only
 # way to see from outside which identity guise-gh resolved.
 if [[ "${1:-}" == "echo-token" ]]; then
-  printf '%s\n' "${GH_TOKEN:-}"
+  printf '%s\n' "${GH_TOKEN:-no-token}"
   exit 0
 fi
 

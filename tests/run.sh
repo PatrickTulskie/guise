@@ -623,6 +623,14 @@ expect_eq "GUISE_IDENTITY still overrides the directory" \
   "$(cd "$HOME/agentic-code/agent-one" && GUISE_IDENTITY=agent-two "$HOME/.local/bin/guise-gh" echo-token)" \
   "github_pat_two"
 
+# gh falls back to its stored login when GH_TOKEN is empty, so an unreadable
+# token has to stop guise-gh before gh runs at all.
+rm "$HOME/.config/guise/keys/agent-two.token"
+expect_fail "guise-gh fails when the identity's token can't be read" \
+  gh_token_in "$HOME/elsewhere/agent-two"
+expect_eq "and never reaches gh" \
+  "$(gh_token_in "$HOME/elsewhere/agent-two" 2>/dev/null || true)" ""
+
 # --- doctor notices a clone that fell out of scope ------------------------------
 echo "stranded clones:"
 new_sandbox

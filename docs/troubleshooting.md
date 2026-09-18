@@ -268,6 +268,11 @@ Plain `gh` uses your stored login. Use `guise-gh` — it injects a bot token via
 `GH_TOKEN`, which `gh` prefers over its own credentials. Put "use `guise-gh`
 instead of `gh`" in `CLAUDE.md` and Cursor rules.
 
+`guise-gh` never falls back to that login. If it can't get the identity's token
+it exits before `gh` runs, with `guise-token`'s error above its own; fix that
+one (`guise doctor` names it) and re-run. Helpers installed before this check
+need a `guise update` to pick it up.
+
 ## Your own commits broke (signing errors, wrong email)
 
 This tool never edits your global identity — everything is scoped under the
