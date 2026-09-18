@@ -457,7 +457,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # guise-token resolves the configured default.
 IDENTITY="${GUISE_IDENTITY:-$("$HERE/guise" which 2>/dev/null || true)}"
 
-GH_TOKEN="$("$HERE/guise-token" "$IDENTITY")" exec gh "$@"
+# A separate assignment, so a guise-token failure stops here. As a prefix on the
+# exec its status is discarded, and gh treats an empty GH_TOKEN as unset and
+# runs as whoever is logged in.
+TOKEN="$("$HERE/guise-token" "$IDENTITY")"
+[[ -n "$TOKEN" ]] || { echo "guise-gh: guise-token returned no token -- refusing to run gh as the logged-in user" >&2; exit 1; }
+
+GH_TOKEN="$TOKEN" exec gh "$@"
 EOF
 }
 
