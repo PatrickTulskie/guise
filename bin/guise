@@ -1331,7 +1331,7 @@ wz_ask_vault() {
 wz_secret_noun() { if [[ "$kind" == "user" ]]; then echo token; else echo "private key"; fi; }
 
 # Offers the stores this machine can actually serve: a file always, 1Password
-# with op on PATH, op-cache with that on PATH too. An existing identity's store
+# with op on PATH, op-cache with both on PATH. An existing identity's store
 # goes first so enter keeps it; a new one leads with the file.
 wz_ask_store() { # [current]
   local _cur="${1:-file}" _s _rec="" _menu=()
@@ -1343,7 +1343,7 @@ wz_ask_store() { # [current]
       op)   command -v op >/dev/null || continue
             _menu+=(op "In 1Password" "read on demand · a locked vault pauses the agent") ;;
       op-cache)
-            command -v op-cache >/dev/null || continue
+            command -v op >/dev/null && command -v op-cache >/dev/null || continue
             _menu+=(op-cache "In 1Password, cached by op-cache" "experimental · read once per login · a locked vault doesn't pause the agent") ;;
     esac
   done
