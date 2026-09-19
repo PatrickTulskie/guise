@@ -194,9 +194,26 @@ environment (e.g. `GH_TOKEN=$(guise token)`), that copy *will* expire;
 use `guise-gh`, which mints fresh per invocation, instead of exporting.
 
 If minting itself fails: `guise token` prints the error. Usual causes are
-1Password locked (`op signin`; only for `--store op` identities),
-the app uninstalled, or a rotated private key (re-run `setup --pem` with the
-new download).
+1Password locked (`op signin`; only for `--store op` identities, and for
+`--store op-cache` ones on their first read of a login session), the app
+uninstalled, or a rotated private key (re-run `setup --pem` with the new
+download).
+
+## The agent keeps using a secret you replaced in 1Password
+
+**Cause:** the identity reads through op-cache (`--store op-cache`), which holds
+a value in memory until its daemon exits and can't forget just one reference.
+Rotating through `guise setup --token-file` (or `--pem`) empties it for you;
+editing the item in 1Password by hand does not.
+
+```bash
+op-cache clear
+```
+
+drops everything op-cache holds, so the next read asks 1Password again.
+`doctor`'s "1Password token reachable through op-cache" passes either way — it
+proves a value comes back, not which one — so "token valid and still
+@\<login\>" is the check that catches a stale PAT.
 
 ## Cursor (or Claude Code) doesn't pick up the identity
 

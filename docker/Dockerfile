@@ -4,7 +4,7 @@ FROM debian:bookworm-slim
 
 # git, openssl, jq and ssh-keygen are what guise itself shells out to; perl
 # carries shasum, which the suite hashes artifacts with; zsh makes the shell
-# hook exercisable instead of skipped. op, curl and gh stay stubbed.
+# hook exercisable instead of skipped. op, op-cache, curl and gh stay stubbed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       git \

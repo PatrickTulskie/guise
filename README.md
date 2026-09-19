@@ -126,7 +126,7 @@ never overwrites your edits. It finishes by running `doctor`, which verifies
 the whole chain.
 
 Requires: `gh`, `jq`, and `git`, plus `op` (1Password CLI, signed in) if you
-use `--store op`.
+use `--store op` or `--store op-cache`, and `op-cache` itself for the latter.
 
 An invite nobody accepted, or a token missing its scope, looks fine to every
 other check and only surfaces as a 403 at clone time, so `doctor` verifies the
@@ -137,7 +137,7 @@ Re-running setup for that identity without `--token-file` reuses the stored
 token, so it's safe to re-run any time. Rotating is the same command with a
 fresh `--token-file`.
 
-### Key storage: a plain file or 1Password
+### Key storage: a plain file, 1Password, or 1Password through op-cache
 
 By default the secret — an App's private key, or an account's PAT — is kept
 under `~/.config/guise/keys/` (mode 600). It deliberately does *not* live in
@@ -146,8 +146,23 @@ accidentally commit it.
 
 Pass `--store op` to keep it in 1Password instead, read on demand. The secret
 never touches disk that way, but a locked vault blocks the agent until you
-unlock it. Moving an existing identity into 1Password shreds its file once the
-move lands; moving it back out leaves the 1Password item alone.
+unlock it.
+
+`--store op-cache` is the middle ground, and experimental. The secret still
+lives in 1Password, but reads go through
+[op-cache](https://github.com/PatrickTulskie/op-cache), which keeps the answer
+in memory for the rest of your login session: the first read after you sign in
+prompts the way `op` does, and after that a vault that locks mid-session doesn't
+stall the agent. Nothing is written to disk, and `op-cache stop` — or logging
+out — forgets it. It needs `op-cache` on `PATH` next to `op`
+(`brew install PatrickTulskie/tap/op-cache`).
+
+Moving an identity between stores is a re-run of `setup` with a different
+`--store`. Into 1Password (`op` or `op-cache`) from a file shreds the file once
+the move lands; between `op` and `op-cache` only the reader changes and the
+item stays where it is; back out to a file leaves the 1Password item alone.
+Rotating the secret of an `op-cache` identity empties op-cache, so the agent
+never keeps using the old one.
 
 ## A GitHub App bot instead
 

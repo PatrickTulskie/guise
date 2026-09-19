@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Fake op-cache. `read` answers from $OP_CACHE_FAKE_DIR, which stands in for
+# the daemon's memory, and on a miss asks the op stub and remembers what it
+# said; `clear` and `stop` forget everything; anything else goes to op
+# unchanged, as the real one does. Every call is logged to $OP_CACHE_LOG so a
+# test can tell a read that went through the cache from one that went to op.
+set -euo pipefail
+
+dir="${OP_CACHE_FAKE_DIR:?OP_CACHE_FAKE_DIR must be set}"
+[[ -z "${OP_CACHE_LOG:-}" ]] || printf '%s\n' "$*" >> "$OP_CACHE_LOG"
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  read)
+    # The whole argument list is the key, as in the real one.
+    key=$(printf '%s\n' "$@" | shasum | cut -d' ' -f1)
+    if [[ -f "$dir/$key" ]]; then cat "$dir/$key"; exit 0; fi
+    # op wants its global flags before the subcommand; op-cache takes them after.
+    account=()
+    if [[ "${1:-}" == "--account" ]]; then account=(--account "$2"); shift 2; fi
+    mkdir -p "$dir"
+    op ${account+"${account[@]}"} read "$@" > "$dir/$key.tmp" \
+      || { status=$?; rm -f "$dir/$key.tmp"; exit "$status"; }
+    mv "$dir/$key.tmp" "$dir/$key"
+    cat "$dir/$key"
+    ;;
+  clear|stop)
+    rm -rf "$dir"
+    echo "op-cache: cleared"
+    ;;
+  *)
+    op "$cmd" "$@"
+    ;;
+esac

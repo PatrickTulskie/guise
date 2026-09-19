@@ -16,6 +16,8 @@ export SHELL="${SHELL:-/bin/bash}"
 
 export OP_FAKE_DIR="$SB/op"
 export OP_FAKE_ACCOUNT=my.1password.com
+export OP_CACHE_FAKE_DIR="$SB/op-cache"
+export OP_CACHE_LOG="$SB/op-cache.log"
 export CURL_LOG="$SB/curl.log"
 export SIGNING_KEYS_FILE="$SB/signing_keys"
 export FAKE_APP_ID=1111 FAKE_SLUG=test-agent FAKE_OWNER=PatrickTulskie
@@ -46,6 +48,7 @@ Nothing here reaches the network and nothing survives the container.
   app identity     --owner PatrickTulskie --app-id 1111 --pem ~/sandbox/app-key.pem
   user identity    --login patrick-agent, and any string as the token
   1Password        vault "Private", stored as files under ~/sandbox/op
+  op-cache         what it "remembers" sits under ~/sandbox/op-cache
   API calls        logged to ~/sandbox/curl.log
   signing keys     what the fake account has published: ~/sandbox/signing_keys
 
