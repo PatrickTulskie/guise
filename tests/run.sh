@@ -86,7 +86,7 @@ snapshot() {
 echo "version:"
 new_sandbox
 ver=$(agent --version)
-expect_eq "--version reports the version" "$ver" "guise 0.2.1"
+expect_eq "--version reports the version" "$ver" "guise 0.3.0"
 expect_eq "the subcommand form agrees" "$(agent version)" "$ver"
 expect_eq "and the short flag" "$(agent -v)" "$ver"
 expect_eq "the usage banner carries the same one" \

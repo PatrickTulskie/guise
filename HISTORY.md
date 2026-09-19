@@ -1,3 +1,13 @@
+## 0.3.0
+
+### Added
+
+* Experimental `--store op-cache`, so a 1Password-backed identity keeps working after the vault locks (#20)
+
+### Fixed
+
+* `guise-gh` stops when the identity's token can't be read, instead of falling back to the human's `gh` login (#19)
+
 ## 0.2.1
 
 ### Added
