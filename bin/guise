@@ -188,6 +188,27 @@ identity_from_cwd() { identity_owning "$PWD"; }
 
 key_source() { cfg_get "identity.$1.keysource" || printf 'op'; }
 
+# "op" and "op-cache" are the same 1Password item; they differ only in what
+# answers a read. op asks the vault every time, op-cache remembers the answer
+# in memory for the rest of the login session, so a vault that locks later
+# doesn't stall the agent.
+op_backed() { [[ "$1" == "op" || "$1" == "op-cache" ]]; }
+op_reader() { if [[ "$(key_source "$1")" == "op-cache" ]]; then printf 'op-cache'; else printf 'op'; fi; }
+
+op_read() { # name field -> the field's value on stdout
+  local acct item reader
+  item=$(cfg_get "identity.$1.opitem") || return 1
+  acct=$(cfg_get "identity.$1.opaccount") || acct=""
+  reader=$(op_reader "$1")
+  command -v "$reader" >/dev/null \
+    || die "missing dependency: $reader -- identity '$1' reads its secret from 1Password through it"
+  if [[ -z "$acct" ]]; then "$reader" read "$item/$2"
+  # op-cache hands a command that opens with a flag straight to op, uncached,
+  # so the account has to follow the subcommand there.
+  elif [[ "$reader" == "op-cache" ]]; then op-cache read --account "$acct" "$item/$2"
+  else op --account "$acct" read "$item/$2"; fi
+}
+
 # Commit signing is opt-in, and user identities only: a foo[bot] account has no
 # settings page, so nothing can register a signing key against it.
 signing_enabled() { [[ "$(cfg_get "identity.$1.signing" || true)" == "ssh" ]]; }
@@ -222,16 +243,12 @@ secret_file() {
 }
 
 read_identity_secret() { # name -> PEM (app) or PAT (user) on stdout
-  local acct item path
+  local path
   if [[ "$(key_source "$1")" == "file" ]]; then
     path=$(secret_file "$1") && [[ -f "$path" ]] || return 1
     cat "$path"
   else
-    command -v op >/dev/null || die "missing dependency: op -- identity '$1' keeps its secret in 1Password"
-    item=$(cfg_get "identity.$1.opitem") || return 1
-    acct=$(cfg_get "identity.$1.opaccount") || acct=""
-    if [[ -n "$acct" ]]; then op --account "$acct" read "$item/$(secret_field "$1")"
-    else op read "$item/$(secret_field "$1")"; fi
+    op_read "$1" "$(secret_field "$1")"
   fi
 }
 
@@ -332,10 +349,12 @@ cfg() { git config -f "$CONFIG" --get "identity.$IDENTITY.$1" 2>/dev/null; }
 KIND=$(cfg kind) || KIND="app"
 
 # Key source is per-identity config: "file" reads a local secret (no 1Password
-# involved, suits unattended runs), anything else reads 1Password.
+# involved, suits unattended runs), "op-cache" reads 1Password through op-cache
+# (from memory after the first read of the login session), anything else reads
+# 1Password through op.
 KEY_SOURCE=$(cfg keysource) || KEY_SOURCE="op"
 read_secret() { # <1password field> <config key holding the file path>
-  local field="$1" path item account
+  local field="$1" path item account reader="op"
   if [[ "$KEY_SOURCE" == "file" ]]; then
     path=$(cfg "$2") && [[ -f "$path" ]] \
       || die "secret file missing for identity '$IDENTITY' -- re-run 'guise setup'"
@@ -344,8 +363,14 @@ read_secret() { # <1password field> <config key holding the file path>
     item=$(cfg opitem) \
       || die "no 1Password item in config for '$IDENTITY' -- re-run 'guise setup'"
     account=$(cfg opaccount) || account=""
-    if [[ -n "$account" ]]; then op --account "$account" read "$item/$field"
-    else op read "$item/$field"; fi
+    [[ "$KEY_SOURCE" != "op-cache" ]] || reader="op-cache"
+    command -v "$reader" >/dev/null \
+      || die "$reader not found -- identity '$IDENTITY' reads its secret through it"
+    if [[ -z "$account" ]]; then "$reader" read "$item/$field"
+    # op-cache passes a command that opens with a flag to op uncached, so the
+    # account goes after the subcommand there.
+    elif [[ "$reader" == "op-cache" ]]; then op-cache read --account "$account" "$item/$field"
+    else op --account "$account" read "$item/$field"; fi
   fi
 }
 
@@ -1305,6 +1330,31 @@ wz_ask_vault() {
 
 wz_secret_noun() { if [[ "$kind" == "user" ]]; then echo token; else echo "private key"; fi; }
 
+# Offers the stores this machine can actually serve: a file always, 1Password
+# with op on PATH, op-cache with that on PATH too. An existing identity's store
+# goes first so enter keeps it; a new one leads with the file.
+wz_ask_store() { # [current]
+  local _cur="${1:-file}" _s _rec="" _menu=()
+  [[ -n "${1:-}" ]] || _rec="recommended · "
+  for _s in "$_cur" file op op-cache; do
+    [[ "$_s" != "$_cur" || ${#_menu[@]} -eq 0 ]] || continue
+    case "$_s" in
+      file) _menu+=(file "In a file on this machine" "${_rec}mode 600 under $(display_path "$KEYS_DIR")") ;;
+      op)   command -v op >/dev/null || continue
+            _menu+=(op "In 1Password" "read on demand · a locked vault pauses the agent") ;;
+      op-cache)
+            command -v op-cache >/dev/null || continue
+            _menu+=(op-cache "In 1Password, cached by op-cache" "experimental · read once per login · a locked vault doesn't pause the agent") ;;
+    esac
+  done
+  if [[ ${#_menu[@]} -eq 3 ]]; then
+    store=file
+    wz_done "Credential" "a file on this machine (no 1Password CLI found)"
+  else
+    wz_select store "Where should the $(wz_secret_noun) live?" "${_menu[@]}"
+  fi
+}
+
 # Walks an existing identity's settings with what it has now as every default,
 # so enter all the way through is a plain re-run. Its name, kind and account
 # stay put: those are `rename`, or a new identity.
@@ -1337,15 +1387,8 @@ wz_edit_identity() { # identity
     if wz_yes "Sign @$login's commits?" "$_was"; then sign=1; else sign=0; fi
   fi
 
-  _was=$(key_source "$1")
-  if [[ "$_was" == "op" ]]; then
-    if wz_yes "Keep the $(wz_secret_noun) in 1Password?" y; then store=op; else store=file; fi
-  elif command -v op >/dev/null; then
-    if wz_yes "Keep the $(wz_secret_noun) in a file on this machine?" y; then store=file; else store=op; fi
-  else
-    store=file
-  fi
-  if [[ "$store" == "op" ]]; then
+  wz_ask_store "$(key_source "$1")"
+  if op_backed "$store"; then
     _was=$(cfg_get "identity.$1.opitem" || true)
     _was=${_was#op://}
     [[ -z "$_was" ]] || vault=${_was%%/*}
@@ -1374,8 +1417,11 @@ wz_review() {
     if [[ "$sign" == "1" ]]; then wz_row "Signing" "on, with a key made on this machine"
     else wz_row "Signing" "off"; fi
   fi
-  if [[ "$store" == "op" ]]; then wz_row "Stored in" "1Password, vault $vault"
-  else wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")"; fi
+  case "$store" in
+    op)       wz_row "Stored in" "1Password, vault $vault" ;;
+    op-cache) wz_row "Stored in" "1Password, vault $vault, read through op-cache" ;;
+    *)        wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")" ;;
+  esac
   wz_row "Identity" "${name:-$derived}"
   if [[ -n "$base" ]]; then
     wz_row "Clones in" "$(display_path "$base")/${name:-${login:-<app name>}}/"
@@ -1511,15 +1557,10 @@ wizard_setup() {
 
   if [[ -n "$store" ]]; then
     wz_done "Credential" "$store (from --store)"
-  elif command -v op >/dev/null; then
-    wz_select store "Where should the $(wz_secret_noun) live?" \
-      file "In a file on this machine" "recommended · mode 600 under $(display_path "$KEYS_DIR")" \
-      op   "In 1Password" "read on demand · a locked vault pauses the agent"
   else
-    store=file
-    wz_done "Credential" "a file on this machine (no 1Password CLI found)"
+    wz_ask_store
   fi
-  [[ "$store" != "op" ]] || wz_ask_vault
+  ! op_backed "$store" || wz_ask_vault
 
   wz_section "Where it lives"
   if [[ "$kind" == "user" ]]; then derived="$login"; else derived="named after the app"; fi
@@ -1595,8 +1636,8 @@ cmd_setup() {
   if [[ -n "$name" ]]; then
     [[ "$name" =~ $name_re ]] || die "identity name must match [A-Za-z0-9_-]+: '$name'"
   fi
-  [[ -z "$store" || "$store" == "op" || "$store" == "file" ]] \
-    || die "--store must be 'op' or 'file', got '$store'"
+  [[ -z "$store" || "$store" == "file" ]] || op_backed "$store" \
+    || die "--store must be 'file', 'op' or 'op-cache', got '$store'"
 
   # Whose stored settings a re-run may reuse: the named identity, or the
   # default when no name was given (which is the one it would derive anyway).
@@ -1816,14 +1857,16 @@ cmd_setup() {
   # A secret moving into 1Password leaves a file the config no longer tracks.
   # Shredded at the very end, by the same rule as the signing key above.
   local drop_secret=""
-  if [[ "$store" == "op" ]] && identity_exists "$name" && [[ "$(key_source "$name")" == "file" ]]; then
+  if op_backed "$store" && identity_exists "$name" && [[ "$(key_source "$name")" == "file" ]]; then
     drop_secret=$(cfg_get "identity.$name.tokenfile" || cfg_get "identity.$name.keyfile" || true)
   fi
 
   # --- store the secret (1Password or a local file), shred the source -------
   mkdir -p "$CONFIG_DIR"; chmod 700 "$CONFIG_DIR"
-  if [[ "$store" == "op" ]]; then
+  if op_backed "$store"; then
     command -v op >/dev/null || die "missing dependency: op (or use --store file to keep the secret on disk)"
+    [[ "$store" != "op-cache" ]] || command -v op-cache >/dev/null \
+      || die "missing dependency: op-cache (brew install PatrickTulskie/tap/op-cache, or use --store op)"
     # Not `op whoami`: it reports session-token state and fails under the
     # desktop app's biometric integration even when real operations work.
     op_do vault get "$vault" >/dev/null 2>&1 \
@@ -1847,6 +1890,10 @@ cmd_setup() {
     fi
     [[ "$(op_do read "$op_item/$readback_field")" == "$readback_value" ]] \
       || die "1Password readback failed for $op_item/$readback_field"
+    # op-cache remembers a reference until its daemon exits and can't forget
+    # just one, so a rotated secret would otherwise keep answering as the old
+    # one for the rest of the session.
+    [[ "$store" != "op-cache" ]] || op-cache clear >/dev/null
     secret_path=""
   else
     # Deliberately under ~/.config, NOT the agent workspace -- agents roam
@@ -1893,7 +1940,7 @@ cmd_setup() {
     cfg_set "identity.$name.botuserid" "$bot_user_id"
   fi
   cfg_set "identity.$name.keysource" "$store"
-  if [[ "$store" == "op" ]]; then
+  if op_backed "$store"; then
     cfg_set "identity.$name.opitem" "$op_item"
     cfg_unset "identity.$name.keyfile"
     cfg_unset "identity.$name.tokenfile"
@@ -1997,15 +2044,20 @@ chk_deps() {
   if git config -f "$CONFIG_FILE" --get-regexp '^identity\..*\.signing$' >/dev/null 2>&1; then
     command -v ssh-keygen >/dev/null || return 1
   fi
+  if git config -f "$CONFIG_FILE" --get-regexp '^identity\..*\.keysource$' '^op-cache$' >/dev/null 2>&1; then
+    command -v op-cache >/dev/null || return 1
+  fi
 }
 chk_op() { # name field
-  local acct
-  command -v op >/dev/null || return 1
-  acct=$(cfg_get "identity.$1.opaccount") || acct=""
-  if [[ -n "$acct" ]]; then
-    op --account "$acct" read "$(cfg_get "identity.$1.opitem")/$2" >/dev/null
+  command -v "$(op_reader "$1")" >/dev/null || return 1
+  op_read "$1" "$2" >/dev/null
+}
+op_hint() { # name -> what to do when its 1Password secret can't be read
+  if [[ "$(key_source "$1")" == "op-cache" ]]; then
+    printf 'op signin, install op-cache (brew install PatrickTulskie/tap/op-cache), or re-run setup to recreate %s' \
+      "$(cfg_get "identity.$1.opitem")"
   else
-    op read "$(cfg_get "identity.$1.opitem")/$2" >/dev/null
+    printf 'op signin, or re-run setup to recreate %s' "$(cfg_get "identity.$1.opitem")"
   fi
 }
 chk_keyfile() {
@@ -2189,7 +2241,7 @@ cmd_doctor() {
   [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
 
   say "doctor:"
-  check "dependencies present (gh jq openssl git curl)" \
+  check "dependencies present (gh jq openssl git curl, op-cache if used)" \
         "brew install the missing one" chk_deps
   check "helper binaries installed in $BIN_DIR" \
         "re-run 'guise setup'" chk_binaries
@@ -2218,8 +2270,8 @@ cmd_doctor() {
         check "token file present, non-empty, mode 600" \
               "re-run setup with --store file --token-file, or chmod 600 $(cfg_get "identity.$name.tokenfile")" chk_tokenfile "$name"
       else
-        check "1Password token reachable" \
-              "op signin, or re-run setup to recreate $(cfg_get "identity.$name.opitem")" chk_op "$name" token
+        check "1Password token reachable through $(op_reader "$name")" \
+              "$(op_hint "$name")" chk_op "$name" token
       fi
       check "stored token looks like a PAT (github_pat_... / ghp_...)" \
             "the stored secret isn't a PAT -- re-run setup with a fresh --token-file" chk_token "$name"
@@ -2239,8 +2291,8 @@ cmd_doctor() {
         check "key file present, valid, mode 600" \
               "re-run setup with --store file --pem, or chmod 600 $(cfg_get "identity.$name.keyfile")" chk_keyfile "$name"
       else
-        check "1Password key reachable" \
-              "op signin, or re-run setup to recreate $(cfg_get "identity.$name.opitem")" chk_op "$name" private_key
+        check "1Password key reachable through $(op_reader "$name")" \
+              "$(op_hint "$name")" chk_op "$name" private_key
       fi
       check "token mints (ghs_...)" \
             "wrong app id / installation id / PEM -- re-run setup with a fresh --pem" chk_token "$name"
@@ -2746,13 +2798,20 @@ usage: guise <command> [flags]
              common:
                [--name <identity>]  default: the app slug / account login
                [--default]          make this the default identity
-               [--store <file|op>]  file: secret on disk, mode 600 (default
+               [--store <file|op|op-cache>]
+                                    file: secret on disk, mode 600 (default
                                           for a new identity)
                                     op: secret in 1Password, read on
                                         demand; a locked vault blocks
                                         the agent
+                                    op-cache (experimental): secret in
+                                        1Password, read through op-cache,
+                                        which keeps it in memory for the
+                                        rest of the login session; needs
+                                        op-cache on PATH
                                     re-running setup keeps the store the
-                                    identity already uses
+                                    identity already uses; a different one
+                                    moves the secret
                [--vault <1password vault>] [--op-account <1password account>]
                [--coauthor "Name <email>"] [--base-dir <dir>]
                [--wizard]   ask for the answers instead of taking flags;

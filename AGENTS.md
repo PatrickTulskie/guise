@@ -72,12 +72,13 @@ tooling cloud-hosted agents run on. The harness gives each scenario a fresh
 sandbox: `$HOME` under `mktemp -d`, `$PATH` prefixed with `tests/stubs`, and
 real git/openssl/jq.
 
-Three stubs stand in for the outside world, all driven by environment variables
+The stubs stand in for the outside world, all driven by environment variables
 rather than recorded fixtures:
 
 | Stub | Stands in for | Driven by |
 |---|---|---|
 | `tests/stubs/op` | 1Password CLI, backed by files under `$OP_FAKE_DIR/<vault>/<item>/<field>` | `OP_FAKE_ACCOUNT`, `OP_FAKE_FORBID` (assert op is never called) |
+| `tests/stubs/op-cache` | op-cache, with `$OP_CACHE_FAKE_DIR` standing in for the daemon's memory; a miss falls through to the op stub | `OP_CACHE_LOG` (every call, so a test can tell a cached read from a direct one) |
 | `tests/stubs/curl` | the GitHub API, matched on URL, every call logged to `$CURL_LOG` | `FAKE_APP_ID`, `FAKE_SLUG`, `FAKE_OWNER`, `FAKE_BOT_ID`, `FAKE_LOGIN`, `FAKE_USER_ID`, `FAKE_TOKEN_EXPIRES`, `FAKE_REPO_COUNT` |
 | `tests/stubs/gh` | `gh api user` only, to answer "is this the human's own account?" | `FAKE_GH_LOGIN` (unset = logged out, which must warn, not block) |
 | `tests/stubs/stat` | real `stat` until asked otherwise, then GNU semantics | `FAKE_STAT_GNU` (makes a macOS run exercise the GNU branch of `file_mode`) |
