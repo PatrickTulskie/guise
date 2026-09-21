@@ -2529,7 +2529,10 @@ cmd_list() {
   local names name def mark acct nw=8 aw=7
   names=$(list_identities)
   [[ -n "$names" ]] || die "no identities in config -- run 'guise setup'"
-  def=$(default_identity)
+  # What `clone` and `use` would actually fall back to, which is not always
+  # what the config records: with nothing recorded and one identity in there,
+  # they resolve to it, and the star has to say the same thing they would.
+  def=$(resolve_default) || def=""
 
   for name in $names; do
     [[ ${#name} -le $nw ]] || nw=${#name}

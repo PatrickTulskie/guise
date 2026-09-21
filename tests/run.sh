@@ -609,6 +609,20 @@ expect_eq "the star follows the default" \
   "$(agent list | sed -n 's/^\* \([^ ]*\) .*/\1/p')" "$USER_IDENT"
 expect_fail "list takes no arguments" agent list "$APP_IDENT"
 
+# The star names what a command with nothing to go on would land on, which is
+# not always what the config records -- a lone identity is the default whether
+# or not anything says so, and `clone` and `use` resolve it that way.
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+git config -f "$HOME/.config/guise/config" --unset core.defaultidentity
+expect_eq "with no default recorded, the only identity is still starred" \
+  "$(agent list | sed -n 's/^\* \([^ ]*\) .*/\1/p')" "$APP_IDENT"
+openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
+run_setup --store file --name second --pem "$SB/key2.pem" >/dev/null 2>&1
+git config -f "$HOME/.config/guise/config" --unset core.defaultidentity
+expect_eq "and nothing is starred once there is nothing to resolve" \
+  "$(agent list | sed -n 's/^\* .*/starred/p')" ""
+
 # --- basedir --------------------------------------------------------------------
 echo "workspace directory:"
 new_sandbox
