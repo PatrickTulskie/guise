@@ -218,9 +218,26 @@ use `guise-gh`, which mints fresh per invocation, instead of exporting.
 
 If minting itself fails: `guise token` prints the error. Usual causes are
 1Password locked (`op signin`; only for `--store op` identities, and for
-`--store op-cache` ones on their first read of a login session), the app
-uninstalled, or a rotated private key (re-run `setup --pem` with the new
-download).
+`--store op-cache` ones on their first read of a login session, which
+`guise warm-cache` takes for you), the app uninstalled, or a rotated private
+key (re-run `setup --pem` with the new download).
+
+## An unattended agent is stuck on a 1Password prompt
+
+**Cause:** the identity reads through op-cache (`--store op-cache`), which
+starts every login session holding nothing. The first read of the session is
+the one that prompts 1Password, and after a reboot that read is usually an
+agent's — with nobody at the machine to approve it.
+
+```bash
+guise warm-cache
+```
+
+reads every op-cache-backed secret once, while you're there, and leaves
+op-cache holding them for the rest of the session. Run it from a login item to
+have that happen before any agent asks. It exits non-zero when a vault it needs
+is still out of reach, so a login item that couldn't do its job says so instead
+of failing quietly later.
 
 ## The agent keeps using a secret you replaced in 1Password
 
