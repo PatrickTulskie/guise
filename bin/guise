@@ -2226,16 +2226,20 @@ chk_binaries() { local b; for b in $HELPERS; do [[ -x "$BIN_DIR/$b" ]] || return
 # Depth 3 covers <root>/<identity>/<repo>/.git, so a stray one at
 # <root>/<repo>/.git is inside the same walk.
 stranded_clones() {
-  local root repo dir
-  basedirs | while read -r root; do
+  local depth root repo dir
+  # Workspace roots, plus the directories `rm` left clones in: an identity with
+  # a workspace of its own takes the only record of that root with it.
+  { basedirs | sed 's/^/3 /'
+    git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | sed 's/^/2 /' || true
+  } | while read -r depth root; do
     [[ -n "$root" && -d "$root" ]] || continue
     # A submodule's or worktree's .git is a file, and either is still a repo,
     # so this matches on the name rather than the type.
-    find "$root" -maxdepth 3 -name .git 2>/dev/null | while read -r repo; do
+    find "$root" -maxdepth "$depth" -name .git 2>/dev/null | while read -r repo; do
       dir="${repo%/.git}"
       identity_owning "$dir" >/dev/null || printf '%s\n' "$dir"
     done
-  done
+  done | sort -u
 }
 
 chk_no_stranded_clones() { [[ -z "$STRANDED" ]]; }
@@ -2896,12 +2900,12 @@ identity_clones() { # name -> one clone per line
 }
 
 # Clones holding work that exists nowhere else: uncommitted changes, or commits
-# no remote branch has.
+# no remote branch has -- on a local branch or a detached HEAD.
 unsaved_clones() { # name
   local dir
   identity_clones "$1" | while read -r dir; do
     if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" \
-       || -n "$(git -C "$dir" log -1 --format=%h --branches --not --remotes 2>/dev/null)" ]]; then
+       || -n "$(git -C "$dir" log -1 --format=%h HEAD --branches --not --remotes 2>/dev/null)" ]]; then
       printf '%s\n' "$dir"
     fi
   done
@@ -3049,6 +3053,10 @@ cmd_rm() {
   if [[ -n "$code" && -d "$dir" ]]; then
     rm -rf "$dir"
     say "deleted $dir"
+  fi
+  if [[ -d "$dir" ]] \
+     && ! git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | grep -Fxq "$dir"; then
+    git config -f "$CONFIG_FILE" --add core.strandeddir "$dir"
   fi
 
   local kept=""
