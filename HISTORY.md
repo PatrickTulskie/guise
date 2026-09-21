@@ -1,3 +1,14 @@
+## 0.4.0
+
+### Added
+
+* `guise list`, one row per identity with the account it commits as, its store and workspace (#25)
+* `guise warm-cache`, so the first op-cache read of a login session is yours, not an unattended agent's (#25)
+
+### Fixed
+
+* A `--sign` identity names `ssh-keygen` as its signer, so a global `op-ssh-sign` can't break agent commits or echo the signing key into a transcript (#24)
+
 ## 0.3.0
 
 ### Added
