@@ -5,7 +5,7 @@
 # GitHub account holding a PAT.
 #
 # Subcommands: setup | doctor | uninstall | clone | use | token | update
-#              default | rename | basedir | which | list
+#              default | rename | basedir | which | list | warm-cache
 #
 # Self-contained: the helper binaries, git config template, and commit hook
 # are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
@@ -2693,6 +2693,55 @@ cmd_token() {
 }
 
 # ---------------------------------------------------------------------------
+# warm-cache -- prime op-cache before the agents start
+# ---------------------------------------------------------------------------
+
+# op-cache only holds what something has already asked it for, so after a
+# reboot the first read of an `--store op-cache` identity is the one that
+# prompts 1Password -- usually an unattended agent, with nobody there to
+# approve it. Reading each of those secrets once, by hand or from a login item,
+# moves that prompt to a moment you are present for. Nothing is written: the
+# secret is read and discarded, and op-cache keeps its own copy in memory for
+# the rest of the login session.
+cmd_warm_cache() {
+  local only="" name warmed=0 failed=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name) only="$2"; shift 2 ;;
+      *) die "warm-cache: unknown flag '$1'" ;;
+    esac
+  done
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  if [[ -n "$only" ]]; then
+    identity_exists "$only" \
+      || die "identity '$only' not in config (have: $(list_identities | tr '\n' ' '))"
+    [[ "$(key_source "$only")" == "op-cache" ]] \
+      || die "identity '$only' reads its secret from $(key_source "$only"), not op-cache -- nothing to warm"
+  fi
+
+  for name in $(list_identities); do
+    [[ -z "$only" || "$name" == "$only" ]] || continue
+    [[ "$(key_source "$name")" == "op-cache" ]] || continue
+    # stdout is the secret itself, so it goes nowhere; op's own complaint on
+    # stderr is the useful part of a failure.
+    if op_read "$name" "$(secret_field "$name")" >/dev/null; then
+      say "warmed '$name' from $(cfg_get "identity.$name.opitem")"
+      warmed=$((warmed + 1))
+    else
+      warn "could not read '$name' -- $(op_hint "$name")"
+      failed=$((failed + 1))
+    fi
+  done
+
+  if [[ $warmed -eq 0 && $failed -eq 0 ]]; then
+    say "no identity reads through op-cache -- nothing to warm"
+    return 0
+  fi
+  [[ $failed -eq 0 ]] || die "$failed identity(ies) unread -- the agent that needs one will still prompt"
+  say "$warmed secret(s) cached for the rest of this login session"
+}
+
+# ---------------------------------------------------------------------------
 # default / rename
 # ---------------------------------------------------------------------------
 
@@ -2898,6 +2947,8 @@ usage: guise <command> [flags]
              overrides the shared one; --unset: drop an override
   which      print the identity owning the current directory
   list       print every identity, its account, store, and workspace
+  warm-cache read every op-cache-backed secret once, so the first agent of
+             the session doesn't hit the 1Password prompt  [--name <identity>]
   version    print the version of this copy of the script
 EOF
 }
@@ -2915,6 +2966,7 @@ case "${1:-}" in
   basedir)    shift; cmd_basedir "$@" ;;
   which)      shift; cmd_which "$@" ;;
   list)       shift; cmd_list "$@" ;;
+  warm-cache) shift; cmd_warm_cache "$@" ;;
   version|--version|-v) say "guise $VERSION" ;;
   help|--help|-h|"") usage ;;
   *) usage >&2; die "unknown command '${1}'" ;;

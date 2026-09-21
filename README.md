@@ -157,6 +157,21 @@ stall the agent. Nothing is written to disk, and `op-cache stop` — or logging
 out — forgets it. It needs `op-cache` on `PATH` next to `op`
 (`brew install PatrickTulskie/tap/op-cache`).
 
+That first read is the catch: after a reboot it's usually an agent's, running
+unattended, with nobody there to approve the prompt. `guise warm-cache` takes
+it instead:
+
+```bash
+guise warm-cache                 # every op-cache-backed identity
+guise warm-cache --name oss      # just the one
+```
+
+Approve it once and the rest of the login session is yours to walk away from.
+Each secret is read and thrown away — op-cache keeps the copy — so nothing
+lands on disk, which makes it safe to run from a login item before you start
+dispatching agents. It exits non-zero if a vault it needs is out of reach,
+rather than leaving you to find out at commit time.
+
 Moving an identity between stores is a re-run of `setup` with a different
 `--store`. Into 1Password (`op` or `op-cache`) from a file shreds the file once
 the move lands; between `op` and `op-cache` only the reader changes and the
@@ -326,6 +341,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise basedir [path]` | show or move the workspace directory, clones included |
 | `guise which` | print the identity owning the current directory |
 | `guise list` | print every identity, its account, store, and workspace |
+| `guise warm-cache` | read every op-cache-backed secret once, so no agent meets the 1Password prompt |
 | `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
 | `guise version` | print the version of this copy of the script (`--version`, `-v`) |
 
