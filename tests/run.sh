@@ -583,6 +583,74 @@ expect_eq "rename refuses a name already in use" "$?" "1"
 "$ROOT/bin/guise" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
 
+# --- rm -------------------------------------------------------------------------
+echo "rm:"
+new_sandbox
+run_setup --store op --pem "$SB/key.pem" >/dev/null 2>&1
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --sign --token-file "$SB/pat.txt" >/dev/null 2>&1
+keys="$HOME/.config/guise/keys"
+app_dir="$HOME/agentic-code/$APP_IDENT"
+user_dir="$HOME/agentic-code/$USER_IDENT"
+git init -q "$user_dir/someclone"
+rm_snap() { cat "$HOME/.config/guise/config" "$HOME/.config/guise/gitconfig" | shasum; }
+before=$(rm_snap)
+
+expect_fail "a bare rm with no terminal refuses rather than guessing" agent rm "$USER_IDENT"
+expect_fail "--keep contradicts the flags that delete" agent rm "$USER_IDENT" --keep --code
+expect_fail "rm refuses an unknown identity" agent rm nonesuch --force
+git config -f "$HOME/.config/guise/config" "identity.$USER_IDENT.basedir" "$app_dir"
+expect_fail "--code refuses a directory another identity lives in" agent rm "$APP_IDENT" --code
+git config -f "$HOME/.config/guise/config" --unset "identity.$USER_IDENT.basedir"
+printf 'n\nn\nn\nn\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --wizard >/dev/null 2>&1
+expect_eq "declining the wizard's last question exits 1" "$?" "1"
+expect_eq "and none of those changed anything" "$(rm_snap)" "$before"
+expect "or deleted anything" test -d "$app_dir" -a -d "$user_dir/someclone"
+
+# The wizard only answers the flags: keep the clones and the signing key, shred
+# the token.
+printf 'n\ny\nn\ny\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --wizard >/dev/null 2>&1
+expect_eq "the wizard removes an identity" "$?" "0"
+expect_eq "its config section is gone" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
+expect "its rendered conf is gone" test ! -e "$HOME/.config/guise/git/$USER_IDENT.conf"
+expect "the token it was told to shred is gone" test ! -e "$keys/$USER_IDENT.token"
+expect "the signing key it was told to keep stays" test -f "$keys/$USER_IDENT.signing"
+expect "and so do the clones" test -d "$user_dir/someclone"
+expect_eq "which are no longer in any identity's scope" \
+  "$(git -C "$user_dir/someclone" config --get user.email)" "human@example.com"
+git init -q "$app_dir/repo"
+expect_eq "the other identity still applies in its directory" \
+  "$(git -C "$app_dir/repo" config --get user.email)" \
+  "3333+test-agent[bot]@users.noreply.github.com"
+
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --sign --token-file "$SB/pat.txt" >/dev/null 2>&1
+agent rm "$USER_IDENT" --force > "$SB/rm.out" 2>&1
+expect_eq "rm --force exits 0" "$?" "0"
+expect "--force takes the token" test ! -e "$keys/$USER_IDENT.token"
+expect "both halves of the signing key" \
+  test ! -e "$keys/$USER_IDENT.signing" -a ! -e "$keys/$USER_IDENT.signing.pub"
+expect "and the clones" test ! -e "$user_dir"
+expect "and says which public key to take off the account" grep -q "ssh-ed25519 " "$SB/rm.out"
+
+# Picked from the wizard's menu this time. It is the default, and its secret is
+# in 1Password, which is not guise's to delete.
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
+printf '%s\ny\ny\n' "$APP_IDENT" | "$ROOT/bin/guise" rm --wizard >/dev/null 2>&1
+expect_eq "the wizard removes an identity picked from its menu" "$?" "0"
+expect "deleting its directory when told to" test ! -e "$app_dir"
+expect "the 1Password item is left alone" test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
+expect_eq "the default moves to the only identity left" "$(cfg core.defaultidentity)" "$USER_IDENT"
+
+agent rm "$USER_IDENT" --keep >/dev/null 2>&1
+expect_eq "rm --keep exits 0" "$?" "0"
+expect_eq "the last identity can go too" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
+expect "--keep leaves the token" test -f "$keys/$USER_IDENT.token"
+expect "and the directory" test -d "$user_dir"
+expect "the rest of the install stays for the next setup" \
+  grep -q "guise" "$HOME/.gitconfig"
+
 # --- list -----------------------------------------------------------------------
 # One row per identity, carrying what you'd otherwise open the config file for:
 # which account it commits as, where its secret lives, where its clones go.

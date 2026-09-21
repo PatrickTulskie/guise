@@ -338,6 +338,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise token` | print the identity's token (debugging / harness use) |
 | `guise default [name]` | show or change the identity used when none is named |
 | `guise rename <old> <new>` | rename an identity, its directory, and its key files |
+| `guise rm [name]` | remove one identity; asks what should go with it, or takes flags saying so |
 | `guise basedir [path]` | show or move the workspace directory, clones included |
 | `guise which` | print the identity owning the current directory |
 | `guise list` | print every identity, its account, store, and workspace |
@@ -374,6 +375,34 @@ made before this behavior are the reason it exists:
 ```bash
 guise rename default patricktulskie-agent
 ```
+
+## Removing an identity
+
+```bash
+guise rm                       # pick one, then answer what should go with it
+guise rm someorg               # the same questions, for that one
+```
+
+The wiring always goes: the config section, the rendered git conf, the cached
+token, and the `includeIf` that scoped its directory. Everything else is a
+question, and a flag for when there is no terminal to ask on:
+
+| Flag | Also removes |
+|---|---|
+| `--keep` | nothing — the wiring only |
+| `--code` | the identity's directory and every clone in it |
+| `--secret` | its private key or token file under `~/.config/guise/keys/` |
+| `--signing-key` | its local signing key; the public half is printed so you can take it off the account |
+| `--force` | all three |
+
+With no flags and no terminal, `rm` refuses rather than guess. A 1Password item
+is yours, not guise's, so it stays whatever you pass. `--code` refuses when
+another identity's workspace sits inside the directory it would delete.
+
+Clones you keep fall out of `includeIf` scope and **start committing as you**,
+the same as a clone left behind by a workspace move. `guise doctor` lists them.
+Removing the default identity hands the default to the only one left, or leaves
+it unset for `guise default <name>` when there are several.
 
 ## Where the clones live
 
