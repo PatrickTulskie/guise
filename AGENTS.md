@@ -11,7 +11,7 @@ Rules from `~/agentic-code/AGENTS.md` (use `guise-gh`, no hand-written
 `Co-authored-by`, never touch git config or remotes) stack on top of this file
 and still apply. What follows is specific to this repo.
 
-## Never test setup, uninstall, or rename against your real machine
+## Never test setup, uninstall, rename, or rm against your real machine
 
 `setup` rewrites `~/.gitconfig`, writes `~/.config/guise/`, and installs into
 `~/.local/bin`. `uninstall` tears out the wiring for **every** identity at once
@@ -32,7 +32,7 @@ first:
 HOME=$(mktemp -d) PATH="tests/stubs:$PATH" bin/guise setup --help
 ```
 
-Never run a bare `bin/guise setup`, `uninstall`, or `rename` to "see what
+Never run a bare `bin/guise setup`, `uninstall`, `rename`, or `rm` to "see what
 happens". Ask instead.
 
 That rule is about developing on the tool, not about using it. When the human
@@ -54,10 +54,13 @@ and offering them that instead is a fine answer when the flags aren't settled.
 loaded it replaces itself with an interactive shell, so the tool call never
 returns. `guise use <name> --emit-shell` only prints the `cd` and is safe.
 
-`uninstall` and `rename` stay off the table unless the human asks for that exact
-operation and you have read back what it does first. Neither will stop you:
-`rename` never confirms, and `uninstall` prompts only on a terminal — with no
-TTY, which is your normal case, it skips the prompt.
+`uninstall`, `rename` and `rm` stay off the table unless the human asks for that
+exact operation and you have read back what it does first. None of them will
+stop you: `rename` never confirms, and `uninstall` prompts only on a terminal —
+with no TTY, which is your normal case, it skips the prompt. `rm` with no flags
+refuses without a TTY, but every flag is an answer, and `--code` or `--force`
+deletes the human's clones with no further question. Never pick those flags
+yourself.
 
 ## Tests
 
@@ -100,8 +103,8 @@ mounted at `/work` and `docker/entrypoint.sh` standing the fake world up around
 the shell: the stubs ahead of everything on `PATH`, the same `FAKE_*` values the
 suite uses, a fresh `~/sandbox/app-key.pem` for the app path, and `guise`
 resolving to `bin/guise` off the working tree so an edit on the host takes
-effect on the next command. `setup`, `rename` and `uninstall` are all fair game
-in there — the `$HOME` they rewrite dies with the container.
+effect on the next command. `setup`, `rename`, `rm` and `uninstall` are all fair
+game in there — the `$HOME` they rewrite dies with the container.
 
 It reaches nothing real. There is no `gh` and no `op` in the image, and the
 stubbed `curl` is the only one on `PATH`, so a run that somehow escapes the fake

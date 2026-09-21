@@ -270,8 +270,12 @@ mechanism.
 **Cause:** the workspace directory changed but that clone didn't come along, so
 it now sits outside every `includeIf` scope and commits as you.
 
-`guise basedir <path>` moves the identity directories for you, so this is what
-a hand-moved clone — or a `core.basedir` edited directly in
+`guise rm` without `--code` leaves this behind on purpose: the clones stay, the
+identity that scoped them is gone. Delete them, move them under another
+identity's directory, or set the identity up again under the same name.
+
+`guise basedir <path>` moves the identity directories for you, so otherwise this
+is what a hand-moved clone — or a `core.basedir` edited directly in
 `~/.config/guise/config` — looks like afterwards. `guise doctor` lists the
 offenders by path under "no clones stranded outside an identity directory".
 

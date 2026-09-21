@@ -1020,7 +1020,7 @@ require_deps() { # kind
 # underscore-prefixed: bash scoping is dynamic, and a local sharing a name with
 # the caller's variable would have the callee assign to itself instead.
 
-WZ_TTY="" WZ_COLS=80 WZ_INDEX=0
+WZ_TTY="" WZ_COLS=80 WZ_INDEX=0 WZ_CMD="setup"
 WZ_DIM="" WZ_BOLD="" WZ_CYAN="" WZ_GREEN="" WZ_YELLOW="" WZ_INV="" WZ_OFF=""
 
 wz_init() {
@@ -1080,7 +1080,7 @@ wz_ask() { # varname "prompt" [default] [placeholder] -- non-zero on EOF
 wz_require() { # varname "prompt" [default] -- re-asks until there is an answer
   local _var="$1" _got=""
   while :; do
-    wz_ask _got "$2" "${3:-}" || die "setup: ran out of input at '$2'"
+    wz_ask _got "$2" "${3:-}" || die "$WZ_CMD: ran out of input at '$2'"
     [[ -z "$_got" ]] || break
     wz_warn "that one's required"
   done
@@ -1116,7 +1116,7 @@ wz_yes() { # "question" <y|n> -- the second argument is the default
         printf '\r\033[2K%s◆%s  %s  %s○ Yes /%s %s● No%s' \
           "$WZ_CYAN" "$WZ_OFF" "$_q" "$WZ_DIM" "$WZ_OFF" "$WZ_GREEN" "$WZ_OFF" >&2
       fi
-      IFS= read -rsn1 _k || die "setup: ran out of input at '$_q'"
+      IFS= read -rsn1 _k || die "$WZ_CMD: ran out of input at '$_q'"
       case "$_k" in
         ""|" ") break ;;
         y|Y) _yes=1; break ;;
@@ -1130,7 +1130,7 @@ wz_yes() { # "question" <y|n> -- the second argument is the default
     wz_done "$_q" "$([[ -n "$_yes" ]] && echo Yes || echo No)"
   else
     while :; do
-      wz_ask _ans "$_q (y/n)" "$2" || die "setup: ran out of input at '$_q'"
+      wz_ask _ans "$_q (y/n)" "$2" || die "$WZ_CMD: ran out of input at '$_q'"
       case "$(lower "$_ans")" in
         y|yes) _yes=1; break ;;
         n|no)  _yes=""; break ;;
@@ -1168,7 +1168,7 @@ wz_select() { # varname "question" <key> "label" "hint" ... -- the first is the 
       done
       printf '\r\033[2K' >&2
       wz_line "${WZ_DIM}└  ↑/↓ to move · enter to choose${WZ_OFF}"
-      IFS= read -rsn1 _k || die "setup: ran out of input at '$_q'"
+      IFS= read -rsn1 _k || die "$WZ_CMD: ran out of input at '$_q'"
       case "$_k" in
         ""|" ") break ;;
         k) _cur=$(( (_cur + _n - 1) % _n )) ;;
@@ -1189,7 +1189,7 @@ wz_select() { # varname "question" <key> "label" "hint" ... -- the first is the 
     done
     _cur=""
     while [[ -z "$_cur" ]]; do
-      wz_ask _ans "Pick one" "${_keys[0]}" || die "setup: ran out of input at '$_q'"
+      wz_ask _ans "Pick one" "${_keys[0]}" || die "$WZ_CMD: ran out of input at '$_q'"
       for ((_i = 0; _i < _n; _i++)); do
         if [[ "$(lower "$_ans")" == "$(lower "${_keys[$_i]}")" || "$_ans" == "$((_i + 1))" ]]; then
           _cur=$_i; break
@@ -1220,7 +1220,7 @@ wz_browser() { # "title" "step"...
   done
   wz_bar
   printf "%s◆%s  Press enter once that's done › " "$WZ_CYAN" "$WZ_OFF" >&2
-  IFS= read -r _ignored || die "setup: ran out of input"
+  IFS= read -r _ignored || die "$WZ_CMD: ran out of input"
   wz_settle "Press enter once that's done" "done" "$((${#_ignored} + 40))"
 }
 
@@ -1572,7 +1572,7 @@ wizard_setup() {
   # either way, so a bad one dies there with the same message a flag gets.
   [[ -n "$name" ]] \
     || wz_ask name "Name this identity" "" "$derived" \
-    || die "setup: ran out of input"
+    || die "$WZ_CMD: ran out of input"
   [[ -n "$base" ]] || wz_require base "Where should its clones live?" "$(display_path "$(basedir)")"
   case "$base" in "~") base="$HOME" ;; "~/"*) base="$HOME/${base#\~/}" ;; esac
 
@@ -2888,6 +2888,183 @@ cmd_rename() {
 }
 
 # ---------------------------------------------------------------------------
+# rm -- remove one identity
+# ---------------------------------------------------------------------------
+
+identity_clones() { # name -> one clone per line
+  find "$(identity_dir "$1")" -maxdepth 2 -name .git 2>/dev/null | sed 's|/\.git$||'
+}
+
+# Clones holding work that exists nowhere else: uncommitted changes, or commits
+# no remote branch has.
+unsaved_clones() { # name
+  local dir
+  identity_clones "$1" | while read -r dir; do
+    if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" \
+       || -n "$(git -C "$dir" log -1 --format=%h --branches --not --remotes 2>/dev/null)" ]]; then
+      printf '%s\n' "$dir"
+    fi
+  done
+}
+
+# Workspaces may nest, so deleting one identity's directory can take another's
+# with it.
+identity_nested_in() { # name -> an identity whose directory is inside this one's
+  local other dir
+  dir=$(identity_dir "$1")
+  for other in $(list_identities); do
+    [[ "$other" != "$1" ]] || continue
+    case "$(identity_dir "$other")/" in
+      "$dir"/*) printf '%s' "$other"; return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# Answers cmd_rm's flags, the way wizard_setup answers cmd_setup's. Asks only
+# about what is there to remove, and only what a flag has not already answered.
+wz_rm() {
+  local n menu=() dir clones unsaved nested keyfile signkey
+  wz_init
+  wz_line ""
+  wz_line "${WZ_DIM}┌${WZ_OFF}  ${WZ_INV} guise ${WZ_OFF}  ${WZ_BOLD}Remove an identity${WZ_OFF}"
+  wz_bar "${WZ_DIM}^C whenever you like -- nothing changes until you say so.${WZ_OFF}"
+
+  if [[ -z "$name" ]]; then
+    wz_bar
+    for n in $(list_identities); do menu+=("$n" "$n" "$(identity_account "$n")"); done
+    [[ ${#menu[@]} -gt 0 ]] || die "no identities in config -- nothing to remove"
+    wz_select name "Which identity?" "${menu[@]}"
+  fi
+
+  dir=$(identity_dir "$name")
+  clones=$(identity_clones "$name" | wc -l | tr -d ' ')
+  wz_section "$name"
+  wz_row "Account" "$(identity_account "$name")"
+  if op_backed "$(key_source "$name")"; then
+    wz_row "Stored in" "1Password ${WZ_DIM}(yours -- guise leaves the item alone)${WZ_OFF}"
+  else
+    wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")"
+  fi
+  if [[ "$clones" == "1" ]]; then clones="1 clone"; else clones="$clones clones"; fi
+  wz_row "Clones in" "$(display_path "$dir")/ ${WZ_DIM}($clones)${WZ_OFF}"
+  wz_bar
+
+  if [[ -z "$code" && -d "$dir" ]]; then
+    if nested=$(identity_nested_in "$name"); then
+      wz_warn "$nested lives inside $(display_path "$dir"), so that directory stays."
+    else
+      unsaved=$(unsaved_clones "$name")
+      if [[ -n "$unsaved" ]]; then
+        wz_warn "These hold work that isn't pushed anywhere:"
+        printf '%s\n' "$unsaved" | while read -r n; do wz_bar "  $(display_path "$n")"; done
+      fi
+      wz_bar "${WZ_DIM}Clones left behind start committing as you.${WZ_OFF}"
+      if wz_yes "Delete $(display_path "$dir") and everything in it?" n; then code=1; fi
+    fi
+  fi
+  keyfile=$(secret_file "$name") || keyfile=""
+  if [[ -z "$secret" && -n "$keyfile" && -f "$keyfile" ]]; then
+    if wz_yes "Shred its stored $(secret_field "$name" | tr _ ' ')?" y; then secret=1; fi
+  fi
+  signkey=$(signing_key "$name")
+  if [[ -z "$signing" && -f "$signkey" ]]; then
+    if wz_yes "Shred its signing key?" y; then signing=1; fi
+  fi
+
+  wz_bar
+  if ! wz_yes "Remove $name?" n; then
+    wz_line "${WZ_DIM}└${WZ_OFF}  No worries -- nothing was removed."
+    exit 1
+  fi
+  wz_line "${WZ_DIM}└${WZ_OFF}  On it."
+  wz_line ""
+}
+
+cmd_rm() {
+  local name="" code="" secret="" signing="" keep="" wizard="" flags=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --code)        code=1; flags=1; shift ;;
+      --secret)      secret=1; flags=1; shift ;;
+      --signing-key) signing=1; flags=1; shift ;;
+      --force)       code=1; secret=1; signing=1; flags=1; shift ;;
+      --keep)        keep=1; flags=1; shift ;;
+      --wizard)      wizard=1; shift ;;
+      -*) die "rm: unknown flag '$1'" ;;
+      *)
+        [[ -z "$name" ]] || die "rm: too many arguments"
+        name="$1"; shift ;;
+    esac
+  done
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  [[ -z "$keep" || -z "$code$secret$signing" ]] \
+    || die "rm: --keep removes the wiring and nothing else, so it can't join --code, --secret, --signing-key or --force"
+  [[ -z "$name" ]] || identity_exists "$name" || die "identity '$name' not in config"
+
+  if [[ -z "$wizard" && $flags -eq 0 ]]; then
+    [[ -t 0 ]] || die "rm: no terminal to ask on, so say what goes -- --keep (the wiring only), --code, --secret, --signing-key, or --force (all of it)"
+    wizard=1
+  fi
+  WZ_CMD="rm"
+  [[ -z "$wizard" ]] || wz_rm
+  [[ -n "$name" ]] || die "usage: guise rm <identity> [--keep | --code --secret --signing-key | --force]"
+
+  local dir keyfile signkey nested was_default="" left count
+  dir=$(identity_dir "$name")
+  keyfile=$(secret_file "$name") || keyfile=""
+  signkey=$(signing_key "$name")
+  if [[ -n "$code" ]] && nested=$(identity_nested_in "$name"); then
+    die "identity '$nested' lives inside $dir -- move it with 'guise basedir' or remove it first"
+  fi
+  local in_op=""; if op_backed "$(key_source "$name")"; then in_op=1; fi
+  [[ "$(default_identity)" != "$name" ]] || was_default=1
+
+  git config -f "$CONFIG_FILE" --remove-section "identity.$name"
+  rm -f "$RENDER_DIR/$name.conf" "$CACHE_DIR/$name.token.json" "$(allowed_signers "$name")"
+  regen_owned_gitconfig
+  say "removed identity '$name' (config, git wiring, token cache)"
+
+  if [[ -n "$was_default" ]]; then
+    cfg_unset core.defaultidentity
+    left=$(list_identities)
+    count=$(printf '%s' "$left" | grep -c . || true)
+    if [[ "$count" == "1" ]]; then
+      cfg_set core.defaultidentity "$left"
+      say "default identity is now '$left'"
+    elif [[ "$count" != "0" ]]; then
+      say "no default identity now -- pick one with 'guise default <name>'"
+    fi
+  fi
+
+  if [[ -n "$secret" && -n "$keyfile" && -f "$keyfile" ]]; then
+    shred_file "$keyfile"
+    say "shredded $keyfile"
+  fi
+  if [[ -n "$signing" && ( -f "$signkey" || -f "$signkey.pub" ) ]]; then
+    say "signing key:"
+    shred_signing_key "$signkey"
+  fi
+  if [[ -n "$code" && -d "$dir" ]]; then
+    rm -rf "$dir"
+    say "deleted $dir"
+  fi
+
+  local kept=""
+  [[ -z "$in_op" ]] || kept="$kept  - the 1Password item holding its credential"$'\n'
+  [[ -z "$keyfile" || ! -f "$keyfile" ]] || kept="$kept  - $keyfile"$'\n'
+  [[ ! -f "$signkey" ]] \
+    || kept="$kept  - $signkey, and its public half on the agent account"$'\n'
+  [[ ! -d "$dir" ]] \
+    || kept="$kept  - $dir -- clones in it now commit as you; 'guise doctor' lists them"$'\n'
+  if [[ -n "$kept" ]]; then
+    say ""
+    say "left alone (remove yourself if you want them gone):"
+    printf '%s' "$kept"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 
 usage() {
   cat <<EOF
@@ -2944,6 +3121,12 @@ usage: guise <command> [flags]
   default    show the identity used when none is named, or set it  [<name>]
   rename     rename an identity, its directory, and its key files
              <old> <new>
+  rm         remove one identity; a bare "guise rm" on a terminal asks what
+             should go with it, and without a terminal it needs a flag
+             [<identity>] [--keep | --code --secret --signing-key | --force]
+             --keep: the wiring only    --code: its directory and clones
+             --secret: its key or token file    --signing-key: its signing key
+             --force: all of those; a 1Password item is yours and always stays
   basedir    show or move the workspace directory, taking the clones with it
              [<path>] [--name <identity>] [--unset]
              without <path>: print it; --name: just that identity's, which
@@ -2966,6 +3149,7 @@ case "${1:-}" in
   token)      shift; cmd_token "$@" ;;
   default)    shift; cmd_default "$@" ;;
   rename)     shift; cmd_rename "$@" ;;
+  rm)         shift; cmd_rm "$@" ;;
   basedir)    shift; cmd_basedir "$@" ;;
   which)      shift; cmd_which "$@" ;;
   list)       shift; cmd_list "$@" ;;
