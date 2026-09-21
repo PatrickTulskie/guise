@@ -5,7 +5,7 @@
 # GitHub account holding a PAT.
 #
 # Subcommands: setup | doctor | uninstall | clone | use | token | update
-#              default | rename | basedir | which
+#              default | rename | basedir | which | list
 #
 # Self-contained: the helper binaries, git config template, and commit hook
 # are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
@@ -2506,6 +2506,49 @@ cmd_which() {
 }
 
 # ---------------------------------------------------------------------------
+# list -- every identity at a glance
+# ---------------------------------------------------------------------------
+
+# How GitHub shows the account behind an identity: an app identity commits as
+# <slug>[bot] and reaches only what its owner installed it on, a user identity
+# is a plain @login.
+identity_account() { # name
+  if [[ "$(identity_kind "$1")" == "user" ]]; then
+    printf '@%s' "$(cfg_get "identity.$1.login")"
+  else
+    printf '%s[bot] on %s' "$(cfg_get "identity.$1.slug")" "$(cfg_get "identity.$1.owner")"
+  fi
+}
+
+# "What do I have, and which one do commands fall back to?" -- otherwise only
+# answerable by reading the config file. Columns are sized from the rows, so a
+# long identity name doesn't shear the table.
+cmd_list() {
+  [[ $# -eq 0 ]] || die "list takes no arguments"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  local names name def mark acct nw=8 aw=7
+  names=$(list_identities)
+  [[ -n "$names" ]] || die "no identities in config -- run 'guise setup'"
+  def=$(default_identity)
+
+  for name in $names; do
+    [[ ${#name} -le $nw ]] || nw=${#name}
+    acct=$(identity_account "$name")
+    [[ ${#acct} -le $aw ]] || aw=${#acct}
+  done
+
+  printf '  %-*s  %-4s  %-*s  %-8s  %s\n' "$nw" IDENTITY KIND "$aw" ACCOUNT STORE WORKSPACE
+  for name in $names; do
+    mark=" "; [[ "$name" != "$def" ]] || mark="*"
+    printf '%s %-*s  %-4s  %-*s  %-8s  %s\n' "$mark" "$nw" "$name" \
+      "$(identity_kind "$name")" "$aw" "$(identity_account "$name")" \
+      "$(key_source "$name")" "$(display_path "$(identity_dir "$name")")"
+  done
+  say ""
+  say "'*' marks the default -- what commands fall back to with no name and no agent directory to read"
+}
+
+# ---------------------------------------------------------------------------
 # basedir -- move a workspace directory after the fact
 # ---------------------------------------------------------------------------
 
@@ -2854,22 +2897,24 @@ usage: guise <command> [flags]
              without <path>: print it; --name: just that identity's, which
              overrides the shared one; --unset: drop an override
   which      print the identity owning the current directory
+  list       print every identity, its account, store, and workspace
   version    print the version of this copy of the script
 EOF
 }
 
 case "${1:-}" in
-  setup)     shift; cmd_setup "$@" ;;
-  doctor)    shift; cmd_doctor "$@" ;;
-  uninstall) shift; cmd_uninstall "$@" ;;
-  clone)     shift; cmd_clone "$@" ;;
-  use)       shift; cmd_use "$@" ;;
-  update)    shift; cmd_update "$@" ;;
-  token)     shift; cmd_token "$@" ;;
-  default)   shift; cmd_default "$@" ;;
-  rename)    shift; cmd_rename "$@" ;;
-  basedir)   shift; cmd_basedir "$@" ;;
-  which)     shift; cmd_which "$@" ;;
+  setup)      shift; cmd_setup "$@" ;;
+  doctor)     shift; cmd_doctor "$@" ;;
+  uninstall)  shift; cmd_uninstall "$@" ;;
+  clone)      shift; cmd_clone "$@" ;;
+  use)        shift; cmd_use "$@" ;;
+  update)     shift; cmd_update "$@" ;;
+  token)      shift; cmd_token "$@" ;;
+  default)    shift; cmd_default "$@" ;;
+  rename)     shift; cmd_rename "$@" ;;
+  basedir)    shift; cmd_basedir "$@" ;;
+  which)      shift; cmd_which "$@" ;;
+  list)       shift; cmd_list "$@" ;;
   version|--version|-v) say "guise $VERSION" ;;
   help|--help|-h|"") usage ;;
   *) usage >&2; die "unknown command '${1}'" ;;

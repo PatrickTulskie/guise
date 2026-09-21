@@ -325,6 +325,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise rename <old> <new>` | rename an identity, its directory, and its key files |
 | `guise basedir [path]` | show or move the workspace directory, clones included |
 | `guise which` | print the identity owning the current directory |
+| `guise list` | print every identity, its account, store, and workspace |
 | `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
 | `guise version` | print the version of this copy of the script (`--version`, `-v`) |
 
@@ -412,6 +413,16 @@ A different app entirely gets its own `--pem`:
 
 ```bash
 guise setup --owner patricktulskie --app-id 67890 --pem ~/Downloads/other.pem --name experiments
+```
+
+`guise list` prints what you have, with the default starred:
+
+```console
+$ guise list
+  IDENTITY              KIND  ACCOUNT                                      STORE     WORKSPACE
+* patricktulskie-agent  app   patricktulskie-agent[bot] on patricktulskie  file      ~/agentic-code/patricktulskie-agent
+  someorg               app   patricktulskie-agent[bot] on some-org        file      ~/agentic-code/someorg
+  oss                   user  @patricktulskie-oss                          op-cache  ~/agentic-code/oss
 ```
 
 Kinds mix freely — an app bot in one subdirectory, an account in another:
