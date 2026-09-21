@@ -601,6 +601,9 @@ expect_fail "--keep contradicts the flags that delete" agent rm "$USER_IDENT" --
 expect_fail "rm refuses an unknown identity" agent rm nonesuch --force
 git config -f "$HOME/.config/guise/config" "identity.$USER_IDENT.basedir" "$app_dir"
 expect_fail "--code refuses a directory another identity lives in" agent rm "$APP_IDENT" --code
+ln -s "$app_dir" "$SB/alias"
+git config -f "$HOME/.config/guise/config" "identity.$USER_IDENT.basedir" "$SB/alias"
+expect_fail "or reaches through a symlink" agent rm "$APP_IDENT" --code
 git config -f "$HOME/.config/guise/config" --unset "identity.$USER_IDENT.basedir"
 printf 'n\nn\nn\nn\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --wizard >/dev/null 2>&1
 expect_eq "declining the wizard's last question exits 1" "$?" "1"
@@ -643,7 +646,8 @@ expect "deleting its directory when told to" test ! -e "$app_dir"
 expect "the 1Password item is left alone" test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
 expect_eq "the default moves to the only identity left" "$(cfg core.defaultidentity)" "$USER_IDENT"
 
-agent rm "$USER_IDENT" --keep >/dev/null 2>&1
+# --keep answers every question but the last one, so one "y" is the whole run.
+printf 'y\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --keep --wizard >/dev/null 2>&1
 expect_eq "rm --keep exits 0" "$?" "0"
 expect_eq "the last identity can go too" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
 expect "--keep leaves the token" test -f "$keys/$USER_IDENT.token"

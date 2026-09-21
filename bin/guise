@@ -2908,13 +2908,14 @@ unsaved_clones() { # name
 }
 
 # Workspaces may nest, so deleting one identity's directory can take another's
-# with it.
+# with it. Resolved first: a workspace reached through a symlink is nested all
+# the same.
 identity_nested_in() { # name -> an identity whose directory is inside this one's
   local other dir
-  dir=$(identity_dir "$1")
+  dir=$(canonical_path "$(identity_dir "$1")")
   for other in $(list_identities); do
     [[ "$other" != "$1" ]] || continue
-    case "$(identity_dir "$other")/" in
+    case "$(canonical_path "$(identity_dir "$other")")/" in
       "$dir"/*) printf '%s' "$other"; return 0 ;;
     esac
   done
@@ -2950,7 +2951,7 @@ wz_rm() {
   wz_row "Clones in" "$(display_path "$dir")/ ${WZ_DIM}($clones)${WZ_OFF}"
   wz_bar
 
-  if [[ -z "$code" && -d "$dir" ]]; then
+  if [[ -z "$keep$code" && -d "$dir" ]]; then
     if nested=$(identity_nested_in "$name"); then
       wz_warn "$nested lives inside $(display_path "$dir"), so that directory stays."
     else
@@ -2964,11 +2965,11 @@ wz_rm() {
     fi
   fi
   keyfile=$(secret_file "$name") || keyfile=""
-  if [[ -z "$secret" && -n "$keyfile" && -f "$keyfile" ]]; then
+  if [[ -z "$keep$secret" && -n "$keyfile" && -f "$keyfile" ]]; then
     if wz_yes "Shred its stored $(secret_field "$name" | tr _ ' ')?" y; then secret=1; fi
   fi
   signkey=$(signing_key "$name")
-  if [[ -z "$signing" && -f "$signkey" ]]; then
+  if [[ -z "$keep$signing" && -f "$signkey" ]]; then
     if wz_yes "Shred its signing key?" y; then signing=1; fi
   fi
 
