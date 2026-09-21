@@ -976,6 +976,11 @@ expect "an rc with no trailing newline comes back byte-identical" \
 echo "commit signing (user identity):"
 new_sandbox
 export FAKE_GH_LOGIN=PatrickTulskie
+# The human signs through something like 1Password's op-ssh-sign, which cannot
+# use a key file on disk. Nothing below may ever reach it.
+printf '#!/bin/sh\necho called >> "%s"\nexit 1\n' "$SB/human-signer.log" > "$SB/human-signer"
+chmod +x "$SB/human-signer"
+git config --global gpg.ssh.program "$SB/human-signer"
 new_token_file "$SB/pat.txt"
 run_setup_user --store file --sign --token-file "$SB/pat.txt" >"$SB/sign.out" 2>&1
 # Non-zero, and correctly so: the key is not on the account yet, which is a real
@@ -1026,6 +1031,39 @@ expect_eq "the commit carries a good signature" \
 expect "allowed signers file names the agent's commit email" \
   grep -q "^4444+$USER_IDENT@users\.noreply\.github\.com namespaces=\"git\" ssh-ed25519 " \
   "$HOME/.config/guise/git/$USER_IDENT.allowed_signers"
+
+# A human who signs through 1Password sets gpg.ssh.program globally, and git
+# merges config per key -- so the scoped conf has to name its own signer, or
+# every agent commit is handed to one that cannot use a key file on disk.
+echo "a global ssh signer is not inherited:"
+expect "the rendered conf names ssh-keygen" \
+  grep -q '^	program = ssh-keygen$' "$HOME/.config/guise/git/$USER_IDENT.conf"
+expect_eq "ssh-keygen signs inside scope" \
+  "$(git -C "$signrepo" config --get gpg.ssh.program)" "ssh-keygen"
+( cd "$signrepo" && echo y > f && git commit -q -am "signed despite the human's signer" )
+expect_eq "a commit still carries a good signature" \
+  "$(git -C "$signrepo" log -1 --format='%G? %s')" "G signed despite the human's signer"
+expect "and the human's signer was never invoked" test ! -e "$SB/human-signer.log"
+expect_eq "which still signs for the human outside scope" \
+  "$(git -C "$SB" config --get gpg.ssh.program)" "$SB/human-signer"
+# A conf rendered before the program line existed: doctor has to name the
+# problem, and update -- not setup -- is what repairs it.
+grep -v '^	program = ' "$HOME/.config/guise/git/$USER_IDENT.conf" \
+  | sed 's|^	signingkey = .*|	signingkey = key::ssh-ed25519 AAAA|' > "$SB/old.conf"
+cat "$SB/old.conf" > "$HOME/.config/guise/git/$USER_IDENT.conf"
+expect_eq "doctor names an inherited signer" \
+  "$(agent doctor 2>&1 | grep -c 'FAIL  agent scope signs with ssh-keygen')" "1"
+expect "and points at update" \
+  sh -c "'$ROOT/bin/guise' doctor 2>&1 | grep -A2 'FAIL  agent scope signs with ssh-keygen' | grep -q \"guise update\""
+# A literal would send signing to an ssh-agent, which holds the human's keys.
+expect_eq "and a signingkey that is not the identity's key file" \
+  "$(agent doctor 2>&1 | grep -c "FAIL  agent scope signs with the identity's own key file")" "1"
+agent update >/dev/null 2>&1
+expect_eq "update re-renders the conf" "$?" "0"
+expect_eq "and the signer check passes again" \
+  "$(agent doctor 2>&1 | grep -c 'ok    agent scope signs with ssh-keygen')" "1"
+expect_eq "as does the key file check" \
+  "$(agent doctor 2>&1 | grep -c "ok    agent scope signs with the identity's own key file")" "1"
 
 # Paste the key into the account's signing keys page, the way a human does.
 echo "once the key is on the account:"

@@ -668,6 +668,9 @@ signing_on_block() { # <allowed signers path>
 	# Lets 'git log --show-signature' verify locally. GitHub verifies against
 	# its own copy of the public key, registered on the agent account.
 	allowedSignersFile = $1
+	# Stated rather than inherited: a global signer such as 1Password's
+	# op-ssh-sign cannot use a key file on disk, and fails every commit here.
+	program = ssh-keygen
 EOF
 }
 
@@ -2177,6 +2180,13 @@ chk_signing_registered() {
   k=$(signing_key "$1"); [[ -f "$k.pub" ]] || return 1
   account_signing_keys "$(cfg_get "identity.$1.login")" | grep -qxF "$(pubkey_body "$k.pub")"
 }
+# Resolved inside agent scope, so a later include that overrides either one is
+# caught too. A signingkey that is not guise's own file -- a public-key literal,
+# say -- would route signing to an ssh-agent, which holds the human's keys.
+_chk_signing_program() { [[ "$(git -C "$REPO" config --get gpg.ssh.program)" == "ssh-keygen" ]]; }
+chk_signing_program() { with_scoped_repo "$1" _chk_signing_program; }
+_chk_signingkey_path() { [[ "$(git -C "$REPO" config --get user.signingkey)" == "$(signing_key "$1")" ]]; }
+chk_signingkey_path() { with_scoped_repo "$1" _chk_signingkey_path "$1"; }
 # End to end rather than by inspection: make a real commit inside agent scope
 # and verify it against the rendered allowed-signers file.
 _chk_signs() {
@@ -2315,8 +2325,14 @@ cmd_doctor() {
       check "signing key registered on @$(cfg_get "identity.$name.login")" \
             "as the agent account, add $(signing_key "$name").pub at github.com/settings/ssh/new with Key type: Signing Key" \
             chk_signing_registered "$name"
+      check "agent scope signs with ssh-keygen, not an inherited signer" \
+            "run 'guise update' to re-render the conf; if it still fails, ~/.gitconfig sets gpg.ssh.program below the guise block, which wins -- move the guise block to the end" \
+            chk_signing_program "$name"
+      check "agent scope signs with the identity's own key file" \
+            "run 'guise update'; if it still fails, ~/.gitconfig sets user.signingkey below the guise block, which wins -- move the guise block to the end" \
+            chk_signingkey_path "$name"
       check "commits sign and verify in agent scope" \
-            "rendered conf should set gpg.format=ssh and user.signingkey -- re-run 'guise setup --sign'" chk_signs "$name"
+            "fix any signing check above first; otherwise try a commit inside $(identity_dir "$name")/ and read git's error" chk_signs "$name"
     else
       check "commit signing off in agent scope" \
             "rendered conf should set commit.gpgsign=false -- re-run setup" chk_gpgsign "$name"
