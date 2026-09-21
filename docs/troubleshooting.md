@@ -101,6 +101,29 @@ ruleset's bypass list instead: Settings → Rules → Rulesets → *(signature
 ruleset)* → Bypass list → Add → **Apps** → the agent app → mode **Always**.
 Scoped, named, and reversible.
 
+## Commits fail with `1Password: invalid ssh public key`
+
+**Cause:** your global `~/.gitconfig` sets `gpg.ssh.program` — 1Password's
+`op-ssh-sign`, typically — and a conf rendered by guise 0.3.0 or older never
+named a signer of its own, so the identity inherited yours. It cannot use a key
+file on disk, so every signed commit in the identity directory fails with
+`fatal: failed to write commit object`.
+
+```bash
+guise update     # re-renders every conf with gpg.ssh.program = ssh-keygen
+guise doctor
+```
+
+If "agent scope signs with ssh-keygen, not an inherited signer" still fails,
+`~/.gitconfig` sets `gpg.ssh.program` *below* the guise block, and the later
+line wins. Move the guise block (between the `# >>> guise >>>` markers) to the
+end of the file.
+
+`op-ssh-sign` can echo the file it was handed into its error. If that failure
+landed in an agent transcript, treat the signing key as leaked: delete
+`~/.config/guise/keys/<identity>.signing` and its `.pub`, re-run
+`guise setup --sign`, and replace the signing key on the agent account.
+
 ## Commits are signed but GitHub shows them Unverified
 
 **Cause:** the public key isn't on the agent account, or it went into the wrong
