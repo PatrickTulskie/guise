@@ -341,6 +341,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise rm [name]` | remove one identity; asks what should go with it, or takes flags saying so |
 | `guise basedir [path]` | show or move the workspace directory, clones included |
 | `guise which` | print the identity owning the current directory |
+| `guise whoami` | say which identity the current directory acts as and what it commits as, or that it has none |
 | `guise list` | print every identity, its account, store, and workspace |
 | `guise warm-cache` | read every op-cache-backed secret once, so no agent meets the 1Password prompt |
 | `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
@@ -440,6 +441,11 @@ identity owns wherever you're standing — it's the same rule `guise clone` and
 ```bash
 cd ~/work/workbot/some-repo && guise which   # workbot
 ```
+
+`guise whoami` is the same answer for a person rather than a script: the
+account behind the identity and the name and email git commits as, or a plain
+"no identity" when you're outside every agent directory and committing as
+yourself. Both exit 1 there.
 
 ## Multiple identities
 

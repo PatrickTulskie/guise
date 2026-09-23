@@ -708,6 +708,27 @@ git config -f "$HOME/.config/guise/config" --unset core.defaultidentity
 expect_eq "and nothing is starred once there is nothing to resolve" \
   "$(agent list | sed -n 's/^\* .*/starred/p')" ""
 
+# --- whoami ---------------------------------------------------------------------
+echo "whoami:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
+mkdir -p "$HOME/agentic-code/$APP_IDENT/deep"
+expect_eq "whoami names the bot and what it commits as" \
+  "$(cd "$HOME/agentic-code/$APP_IDENT/deep" && agent whoami)" \
+  "$APP_IDENT: test-agent[bot] on patricktulskie
+commits as test-agent[bot] <3333+test-agent[bot]@users.noreply.github.com>"
+expect_eq "and an account identity the same way" \
+  "$(cd "$HOME/agentic-code/$USER_IDENT" && agent whoami)" \
+  "$USER_IDENT: @$FAKE_LOGIN
+commits as $FAKE_LOGIN <4444+$FAKE_LOGIN@users.noreply.github.com>"
+expect_eq "outside every agent directory it says there is none" \
+  "$(mkdir -p "$HOME/elsewhere" && cd "$HOME/elsewhere" && agent whoami)" \
+  "no identity -- ~/elsewhere is outside every agent directory, so git commits here as you"
+expect_fail "and exits non-zero, like which" bash -c "cd \"$HOME\" && \"$ROOT/bin/guise\" whoami"
+expect_fail "whoami takes no arguments" agent whoami "$APP_IDENT"
+
 # --- basedir --------------------------------------------------------------------
 echo "workspace directory:"
 new_sandbox

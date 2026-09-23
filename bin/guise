@@ -2509,6 +2509,21 @@ cmd_which() {
   say "$name"
 }
 
+# `which` for a human: the account behind the identity and what git commits
+# as, or a plain statement that nothing here is an agent's. Same resolution and
+# exit status as `which`.
+cmd_whoami() {
+  [[ $# -eq 0 ]] || die "whoami takes no arguments"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  local name
+  if ! name=$(identity_from_cwd); then
+    say "no identity -- $(display_path "$PWD") is outside every agent directory, so git commits here as you"
+    exit 1
+  fi
+  say "$name: $(identity_account "$name")"
+  say "commits as $(git_name "$name") <$(git_email "$name")>"
+}
+
 # ---------------------------------------------------------------------------
 # list -- every identity at a glance
 # ---------------------------------------------------------------------------
@@ -3141,6 +3156,8 @@ usage: guise <command> [flags]
              without <path>: print it; --name: just that identity's, which
              overrides the shared one; --unset: drop an override
   which      print the identity owning the current directory
+  whoami     say which identity the current directory acts as, and what it
+             commits as, or that it belongs to none
   list       print every identity, its account, store, and workspace
   warm-cache read every op-cache-backed secret once, so the first agent of
              the session doesn't hit the 1Password prompt  [--name <identity>]
@@ -3161,6 +3178,7 @@ case "${1:-}" in
   rm)         shift; cmd_rm "$@" ;;
   basedir)    shift; cmd_basedir "$@" ;;
   which)      shift; cmd_which "$@" ;;
+  whoami)     shift; cmd_whoami "$@" ;;
   list)       shift; cmd_list "$@" ;;
   warm-cache) shift; cmd_warm_cache "$@" ;;
   version|--version|-v) say "guise $VERSION" ;;
