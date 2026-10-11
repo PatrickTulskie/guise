@@ -238,6 +238,22 @@ guise setup --name <identity> --op-account my.1password.com
 pins it (`op account list` shows the accounts). Setup pins one on its own, so
 this only hits an identity set up before it did.
 
+## 1Password can't find the item after you moved or renamed it
+
+**Cause:** the identity reads its secret from the `op://` reference setup
+recorded, and that reference doesn't follow the item to a new vault or title.
+The error reads `"<item>" isn't an item in the "<vault>" vault`; `doctor`'s
+hint names the reference it's still looking for. A plain re-run of setup fails
+the same way, since it re-reads the old item.
+
+```bash
+guise setup --name <identity> --op-item op://<vault>/<item>
+```
+
+points it at where the item lives now, without touching the item. It needs a
+`token` field (`private_key` for an app). Running `guise setup` and reviewing
+the identity does the same: it notices the item is gone and asks where it went.
+
 ## An unattended agent is stuck on a 1Password prompt
 
 **Cause:** the identity reads through op-cache (`--store op-cache`), which
