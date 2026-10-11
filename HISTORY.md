@@ -1,3 +1,15 @@
+## 0.5.0
+
+### Added
+
+* `guise rm`, so dropping one identity doesn't mean uninstalling all of them (#27)
+* `setup --op-item`, and a wizard option, to point an identity at a secret already in 1Password (#30)
+
+### Fixed
+
+* `setup` pins the 1Password account, so signing in to a second account can't break an identity's reads (#29)
+* A bare `setup` re-run keeps an identity's existing 1Password item instead of recreating it in `Private` (#30)
+
 ## 0.4.0
 
 ### Added
