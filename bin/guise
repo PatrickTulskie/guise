@@ -1649,6 +1649,9 @@ cmd_setup() {
   # default when no name was given (which is the one it would derive anyway).
   local probe="$name"
   [[ -n "$probe" ]] || probe=$(default_identity)
+  # Every 1Password call below goes to the account the identity is pinned to,
+  # reads included -- not whichever one op happens to default to today.
+  [[ -n "$op_account" ]] || op_account=$(cfg_get "identity.$probe.opaccount" || true)
 
   # Flags for one kind mean that kind, and re-running setup for an existing
   # identity keeps its kind; anything else is an account.
