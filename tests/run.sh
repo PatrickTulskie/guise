@@ -367,6 +367,12 @@ OP_FAKE_DEFAULT=work.1password.com agent setup --name "$USER_IDENT" \
 expect_eq "and setup with --op-account reads it back from the right one" "$?" "0"
 OP_FAKE_DEFAULT=work.1password.com agent doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "leaving it pinned there" "$?" "0"
+git config -f "$HOME/.config/guise/config" identity.$USER_IDENT.opaccount other.1password.com
+new_token_file "$SB/pat2.txt"
+FAKE_LOGIN=second-agent agent setup --kind user --store op --token-file "$SB/pat2.txt" >/dev/null 2>&1
+expect_eq "a new identity set up beside a pinned default exits 0" "$?" "0"
+expect_eq "and pins the account op answered for, not the default's" \
+  "$(cfg identity.second-agent.opaccount)" "my.1password.com"
 
 # --- user identity guardrails ------------------------------------------------
 echo "user identity guardrails:"
