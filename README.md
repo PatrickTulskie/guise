@@ -182,8 +182,18 @@ Moving an identity between stores is a re-run of `setup` with a different
 `--store`. Into 1Password (`op` or `op-cache`) from a file shreds the file once
 the move lands; between `op` and `op-cache` only the reader changes and the
 item stays where it is; back out to a file leaves the 1Password item alone.
+A re-run without `--vault` leaves the item where it is, too; `--vault` is what
+moves it.
 Rotating the secret of an `op-cache` identity empties op-cache, so the agent
 never keeps using the old one.
+
+A secret that's already in 1Password — or an item you moved or renamed — is
+pointed at rather than pasted again: `--op-item op://<vault>/<item>` reads its
+`token` field (`private_key` for an app) and leaves the item as it is. With a
+fresh `--token-file` or `--pem` alongside, that secret is written into the item
+instead. The wizard offers the same as "One already in 1Password" when it asks
+for the secret, and reviewing an identity whose item it can't read asks where
+the item went.
 
 ## A GitHub App bot instead
 

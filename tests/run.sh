@@ -437,6 +437,74 @@ expect "and shreds the file it moved out of" test ! -e "$tokenfile"
 expect_eq "with the token still reading back" \
   "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_filestore"
 
+# --- an item already in 1Password --------------------------------------------
+# --op-item points an identity at a secret where it already lives, so moving or
+# renaming the item in 1Password doesn't mean pasting the secret again.
+echo "an item already in 1Password:"
+new_sandbox
+new_token_file "$SB/pat.txt"
+run_setup_user --store op-cache --token-file "$SB/pat.txt" >/dev/null 2>&1
+mkdir -p "$OP_FAKE_DIR/agents"
+mv "$OP_FAKE_DIR/Private/patrick-agent" "$OP_FAKE_DIR/agents/Moved"
+op-cache clear >/dev/null
+agent doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails once the item moves" "$?" "1"
+expect "and its hint points at --op-item" grep -q -- "--op-item op://<vault>/<item>" "$SB/doctor.out"
+run_setup_user --name "$USER_IDENT" --op-item op://agents/Moved >/dev/null 2>&1
+expect_eq "--op-item points the identity at where it went" "$(cfg identity.$USER_IDENT.opitem)" "op://agents/Moved"
+expect_eq "keeping the store it had" "$(cfg identity.$USER_IDENT.keysource)" "op-cache"
+expect_eq "and the token reads from there" \
+  "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_stub123"
+mv "$OP_FAKE_DIR/agents/Moved" "$OP_FAKE_DIR/agents/MovedAgain"
+OP_FAKE_DEFAULT=work.1password.com run_setup_user --name "$USER_IDENT" \
+  --op-item op://agents/MovedAgain >/dev/null 2>&1
+expect_eq "and reads it through the account the identity is pinned to" "$?" "0"
+
+new_sandbox
+new_token_file "$SB/pat.txt"
+run_setup_user --store op --vault agents --token-file "$SB/pat.txt" >/dev/null 2>&1
+agent setup --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "a bare re-run leaves an item in another vault where it is" \
+  "$(cfg identity.$USER_IDENT.opitem)" "op://agents/patrick-agent"
+expect "rather than recreating it in the default vault" test ! -e "$OP_FAKE_DIR/Private/patrick-agent"
+run_setup_user --name "$USER_IDENT" --vault elsewhere >/dev/null 2>&1
+expect_eq "while --vault still moves it" \
+  "$(cat "$OP_FAKE_DIR/elsewhere/patrick-agent/token")" "github_pat_stub123"
+
+new_sandbox
+mkdir -p "$OP_FAKE_DIR/agents/Held"
+printf 'github_pat_held' > "$OP_FAKE_DIR/agents/Held/token"
+run_setup_user --op-item op://not-a-ref >/dev/null 2>&1
+expect_eq "an --op-item that isn't op://<vault>/<item> is refused" "$?" "1"
+run_setup_user --op-item op://agents/Held --store file >/dev/null 2>&1
+expect_eq "and so is one with --store file" "$?" "1"
+run_setup_user --op-item op://agents/Nope >/dev/null 2>&1
+expect_eq "and one with no token in it" "$?" "1"
+expect "without writing any config" test ! -e "$HOME/.config/guise/config"
+run_setup_user --op-item op://agents/Held >/dev/null 2>&1
+expect_eq "a new identity can start from an item" "$?" "0"
+expect_eq "landing in 1Password rather than the file a new identity defaults to" \
+  "$(cfg identity.$USER_IDENT.keysource)" "op"
+expect "without writing to the item" test ! -e "$OP_FAKE_DIR/agents/Held/login"
+expect "or creating one of its own" test ! -e "$OP_FAKE_DIR/Private/patrick-agent"
+agent setup --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "a bare re-run keeps the item it was pointed at" "$(cfg identity.$USER_IDENT.opitem)" "op://agents/Held"
+expect "still without writing to it" test ! -e "$OP_FAKE_DIR/agents/Held/login"
+expect "or moving it into the default vault" test ! -e "$OP_FAKE_DIR/Private/patrick-agent"
+printf 'github_pat_rotated\n' > "$SB/pat.txt"
+run_setup_user --name "$USER_IDENT" --op-item op://agents/Fresh --token-file "$SB/pat.txt" >/dev/null 2>&1
+expect_eq "a new token alongside --op-item is stored in that item" \
+  "$(cat "$OP_FAKE_DIR/agents/Fresh/token")" "github_pat_rotated"
+expect_eq "which the identity then reads" "$(cfg identity.$USER_IDENT.opitem)" "op://agents/Fresh"
+
+new_sandbox
+mkdir -p "$OP_FAKE_DIR/agents/AppKey"
+cp "$SB/key.pem" "$OP_FAKE_DIR/agents/AppKey/private_key"
+run_setup --op-item op://agents/AppKey >/dev/null 2>&1
+expect_eq "an app identity can start from an item holding its key" "$?" "0"
+agent doctor --name "$APP_IDENT" >/dev/null 2>&1
+expect_eq "and mints with it" "$?" "0"
+
 # --- op-cache key store ------------------------------------------------------
 # The same 1Password item an op store uses; what changes is that reads go
 # through op-cache, which remembers the answer for the rest of the login
@@ -1393,12 +1461,12 @@ expect "and help provisions nothing" test ! -e "$HOME/.config/guise/config"
 # each block below lists them in order.
 echo "guided setup:"
 
-# kind, app-exists, owner, app id, pem, browser pause, store, name, workspace,
-# go
+# kind, app-exists, owner, app id, where the key is, pem, browser pause, store,
+# name, workspace, go
 wizard() { "$ROOT/bin/guise" setup --wizard; }
 
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \
   | wizard >/dev/null 2>&1
 expect_eq "a guided app setup exits 0" "$?" "0"
 # The whole design claim: the wizard only fills in flags, so it has to land the
@@ -1425,7 +1493,7 @@ expect_eq "unless asked to, which is what enter does" "$(cfg core.defaultidentit
 
 # A name and a workspace typed at the prompts, rather than derived.
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n%s\nok\nfile\nchosen\n%s\ny\n' \
+printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\nchosen\n%s\ny\n' \
   "$SB/key.pem" "$HOME/elsewhere" | wizard >/dev/null 2>&1
 expect "an answered name becomes the identity" test -d "$HOME/elsewhere/chosen"
 expect_eq "and an answered workspace becomes the basedir" "$(cfg core.basedir)" "$HOME/elsewhere"
@@ -1433,7 +1501,7 @@ expect_eq "and an answered workspace becomes the basedir" "$(cfg core.basedir)" 
 # Declining at the summary has to leave no trace -- the whole point of asking
 # before doing anything.
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n%s\nok\nfile\n\n\nn\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\nn\n' "$SB/key.pem" \
   | wizard >/dev/null 2>&1
 expect_eq "declining at the summary fails" "$?" "1"
 expect "and writes no config" test ! -e "$HOME/.config/guise/config"
@@ -1442,15 +1510,15 @@ expect "and leaves the PEM alone" test -f "$SB/key.pem"
 # Anything checkable without the network is re-asked, not fatal: a bad choice,
 # a non-numeric app id, and a path with no key at it. A menu also takes the
 # number of its choice.
-printf 'maybe\n2\ny\npatricktulskie\nnotanumber\n1111\n/nonesuch.pem\n%s\nok\nfile\n\n\ny\n' \
+printf 'maybe\n2\ny\npatricktulskie\nnotanumber\n1111\n\n/nonesuch.pem\n%s\nok\nfile\n\n\ny\n' \
   "$SB/key.pem" | wizard >/dev/null 2>&1
 expect_eq "a bad choice, app id, and PEM path are all re-asked" "$?" "0"
 expect_eq "and the run still completes correctly" "$(cfg identity.$APP_IDENT.installationid)" "2222"
 
-# kind, account-exists, login, browser pause, token, sign, store,
-# name, workspace, go, signing-key browser pause, check again or skip
+# kind, account-exists, login, where the token is, browser pause, token, sign,
+# store, name, workspace, go, signing-key browser pause, check again or skip
 new_sandbox
-printf 'user\ny\npatrick-agent\nok\ngithub_pat_wizard\n\n\n\n\ny\nok\nskip\n' \
+printf 'user\ny\npatrick-agent\n\nok\ngithub_pat_wizard\n\n\n\n\ny\nok\nskip\n' \
   | wizard >/dev/null 2>&1
 # Non-zero, and correctly so: the key was skipped rather than added to the
 # account, so doctor still reports the one gap setup can't close.
@@ -1502,7 +1570,7 @@ expect_eq "and the app metadata is intact" "$(cfg identity.$APP_IDENT.appid)" "1
 # wizard asks again instead of ending the run.
 new_sandbox
 export FAKE_GH_LOGIN=PatrickTulskie
-printf 'user\ny\nPatrickTulskie\npatrick-agent\nok\ngithub_pat_wiz\nn\nfile\n\n\ny\n' \
+printf 'user\ny\nPatrickTulskie\npatrick-agent\n\nok\ngithub_pat_wiz\nn\nfile\n\n\ny\n' \
   | wizard >/dev/null 2>&1
 expect_eq "answering the human's own login is re-asked, not fatal" "$?" "0"
 expect_eq "and the agent account is what got set up" \
@@ -1520,10 +1588,10 @@ expect_eq "the flags are taken, not re-asked" "$(cfg identity.$APP_IDENT.appid)"
 expect_eq "including the store" "$(cfg identity.$APP_IDENT.keysource)" "file"
 
 # op-cache is on the store menu when it is installed, and picking it asks for
-# the vault like 1Password does: kind, account-exists, login, browser pause,
-# token, sign, store, vault, name, workspace, go.
+# the vault like 1Password does: kind, account-exists, login, where the token
+# is, browser pause, token, sign, store, vault, name, workspace, go.
 new_sandbox
-printf 'user\ny\npatrick-agent\nok\ngithub_pat_wizcache\nn\nop-cache\n\n\n\ny\n' \
+printf 'user\ny\npatrick-agent\n\nok\ngithub_pat_wizcache\nn\nop-cache\n\n\n\ny\n' \
   | wizard >/dev/null 2>&1
 expect_eq "choosing op-cache at the prompt exits 0" "$?" "0"
 expect_eq "and is what got recorded" "$(cfg identity.$USER_IDENT.keysource)" "op-cache"
@@ -1535,6 +1603,24 @@ snap_cache=$(snapshot)
 printf '%s\n\n\n\n\n\n' "$USER_IDENT" | wizard >/dev/null 2>&1
 expect_eq "reviewing an op-cache identity exits 0" "$?" "0"
 expect_eq "and entering through keeps it" "$(snapshot)" "$snap_cache"
+
+# A token already in 1Password is pointed at rather than pasted, and the
+# reference is re-asked until it reads: kind, account-exists, login, where the
+# token is, item (twice wrong), sign, store, name, workspace, go.
+new_sandbox
+mkdir -p "$OP_FAKE_DIR/agents/Held"
+printf 'github_pat_held' > "$OP_FAKE_DIR/agents/Held/token"
+printf 'user\ny\npatrick-agent\nop\nnope\nop://agents/Missing\nop://agents/Held\nn\n\n\n\ny\n' \
+  | wizard >/dev/null 2>&1
+expect_eq "pointing the wizard at a 1Password item exits 0" "$?" "0"
+expect_eq "and the identity reads from it" "$(cfg identity.$USER_IDENT.opitem)" "op://agents/Held"
+expect_eq "kept in 1Password, since a file isn't on offer" "$(cfg identity.$USER_IDENT.keysource)" "op"
+# Reviewing it once the item has moved says so and asks where it went: new
+# token, signing, where it is now, item, store, go.
+mv "$OP_FAKE_DIR/agents/Held" "$OP_FAKE_DIR/agents/Moved"
+printf '%s\n\n\n\nop://agents/Moved\n\n\n' "$USER_IDENT" | wizard >/dev/null 2>&1
+expect_eq "reviewing an identity whose item moved exits 0" "$?" "0"
+expect_eq "pointing it at the item's new home" "$(cfg identity.$USER_IDENT.opitem)" "op://agents/Moved"
 
 # A dumb terminal is still a terminal, so a bare setup runs the wizard -- but
 # nothing it draws may need the cursor moved to take it back. util-linux and
@@ -1562,7 +1648,7 @@ in_pty() { # "command" -- stdin is what gets typed
   return $rc
 }
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
   | TERM=dumb in_pty "'$ROOT/bin/guise' setup" > "$SB/dumb.out" 2>&1
 grep -q "Look good?" "$SB/dumb.out" || sed 's/^/    | /' "$SB/dumb.out"
 expect "a bare setup on a dumb terminal still runs the wizard" \

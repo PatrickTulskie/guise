@@ -1320,6 +1320,37 @@ wz_ask_token() {
   [[ -n "$wizard_token" ]] || die "setup: empty token"
 }
 
+wz_ask_secret() { # [new|op] -- which answer enter picks
+  local _from=new _new="A new one, made now" _op="One already in 1Password"
+  [[ "$kind" == "user" ]] || _new="The .pem GitHub had you download"
+  if command -v op >/dev/null; then
+    if [[ "${1:-new}" == "op" ]]; then
+      wz_select _from "Where's the $(wz_secret_noun)?" op "$_op" "point at the item" new "$_new" ""
+    else
+      wz_select _from "Where's the $(wz_secret_noun)?" new "$_new" "" op "$_op" "point at the item"
+    fi
+  fi
+  if [[ "$_from" == "op" ]]; then wz_ask_op_item
+  elif [[ "$kind" == "user" ]]; then wz_ask_token
+  else wz_ask_pem; fi
+}
+
+wz_ask_op_item() {
+  local _field=token _re='^op://[^/]+/[^/]+$'
+  [[ "$kind" == "user" ]] || _field=private_key
+  while :; do
+    op_item=""
+    wz_require op_item "Which item? (op://<vault>/<item>)"
+    if [[ ! "$op_item" =~ $_re ]]; then
+      wz_warn "that's not op://<vault>/<item>"
+    elif op_do read "$op_item/$_field" >/dev/null 2>&1; then
+      break
+    else
+      wz_warn "can't read a $_field field from $op_item -- sign in with 'op signin', or check the item"
+    fi
+  done
+}
+
 wz_ask_vault() {
   command -v op >/dev/null \
     || die "the 1Password CLI (op) is not installed -- re-run and choose a file"
@@ -1345,7 +1376,8 @@ wz_ask_store() { # [current]
   for _s in "$_cur" file op op-cache; do
     [[ "$_s" != "$_cur" || ${#_menu[@]} -eq 0 ]] || continue
     case "$_s" in
-      file) _menu+=(file "In a file on this machine" "${_rec}mode 600 under $(display_path "$KEYS_DIR")") ;;
+      file) [[ -z "$op_item" ]] || continue
+            _menu+=(file "In a file on this machine" "${_rec}mode 600 under $(display_path "$KEYS_DIR")") ;;
       op)   command -v op >/dev/null || continue
             _menu+=(op "In 1Password" "read on demand · a locked vault pauses the agent") ;;
       op-cache)
@@ -1353,9 +1385,12 @@ wz_ask_store() { # [current]
             _menu+=(op-cache "In 1Password, cached by op-cache" "experimental · read once per login · a locked vault doesn't pause the agent") ;;
     esac
   done
-  if [[ ${#_menu[@]} -eq 3 ]]; then
+  if [[ ${#_menu[@]} -eq 3 && "${_menu[0]}" == "file" ]]; then
     store=file
     wz_done "Credential" "a file on this machine (no 1Password CLI found)"
+  elif [[ ${#_menu[@]} -eq 3 ]]; then
+    store=${_menu[0]}
+    wz_done "Credential" "${_menu[1]}"
   else
     wz_select store "Where should the $(wz_secret_noun) live?" "${_menu[@]}"
   fi
@@ -1393,12 +1428,22 @@ wz_edit_identity() { # identity
     if wz_yes "Sign @$login's commits?" "$_was"; then sign=1; else sign=0; fi
   fi
 
+  # An item moved or renamed in 1Password leaves nothing for a re-run to read.
+  if [[ -z "$wizard_token$pem" ]] && op_backed "$(key_source "$1")" \
+     && ! chk_op "$1" "$(secret_field "$1")" 2>/dev/null; then
+    wz_warn "can't read $(cfg_get "identity.$1.opitem") -- moved or renamed in 1Password?"
+    reuse=""
+    wz_ask_secret op
+  fi
+
   wz_ask_store "$(key_source "$1")"
-  if op_backed "$store"; then
+  if op_backed "$store" && [[ -z "$op_item" ]]; then
     _was=$(cfg_get "identity.$1.opitem" || true)
     _was=${_was#op://}
     [[ -z "$_was" ]] || vault=${_was%%/*}
+    _was=$vault
     wz_ask_vault
+    [[ "$vault" == "$_was" ]] || vault_given=1
   fi
 
   if [[ "$(default_identity)" == "$1" ]]; then
@@ -1412,20 +1457,22 @@ wz_review() {
   wz_section "One last look"
   if [[ "$kind" == "app" ]]; then
     wz_row "App" "$app_id, installed on $owner"
-    if [[ -n "$reuse" && "$reuse" == "$name" ]]; then wz_row "Key" "keeping the stored one"
+    if [[ -n "$op_item" ]]; then wz_row "Key" "the one in $op_item"
+    elif [[ -n "$reuse" && "$reuse" == "$name" ]]; then wz_row "Key" "keeping the stored one"
     elif [[ -n "$reuse" ]]; then wz_row "Key" "reusing the one stored for $reuse"
     else wz_row "Key" "$(display_path "$pem") ${WZ_DIM}(shredded once stored)${WZ_OFF}"; fi
   else
     wz_row "Account" "@$login"
     if [[ -n "$token_file" ]]; then wz_row "Token" "$token_file ${WZ_DIM}(shredded once stored)${WZ_OFF}"
     elif [[ -n "$wizard_token" ]]; then wz_row "Token" "the one you just pasted"
+    elif [[ -n "$op_item" ]]; then wz_row "Token" "the one in $op_item"
     else wz_row "Token" "keeping the one already stored"; fi
     if [[ "$sign" == "1" ]]; then wz_row "Signing" "on, with a key made on this machine"
     else wz_row "Signing" "off"; fi
   fi
   case "$store" in
-    op)       wz_row "Stored in" "1Password, vault $vault" ;;
-    op-cache) wz_row "Stored in" "1Password, vault $vault, read through op-cache" ;;
+    op)       wz_row "Stored in" "1Password, ${op_item:-vault $vault}" ;;
+    op-cache) wz_row "Stored in" "1Password, ${op_item:-vault $vault}, read through op-cache" ;;
     *)        wz_row "Stored in" "a file under $(display_path "$KEYS_DIR")" ;;
   esac
   wz_row "Identity" "${name:-$derived}"
@@ -1521,7 +1568,8 @@ wizard_setup() {
         reuse=""
       fi
     fi
-    [[ -n "$reuse" || -n "$pem" ]] || wz_ask_pem
+    if [[ -n "$op_item" ]]; then wz_done "Key" "$op_item (from --op-item)"
+    elif [[ -z "$reuse" && -z "$pem" ]]; then wz_ask_secret; fi
     wz_install_app
   else
     if ! wz_yes "Does the agent have its own GitHub account yet?" y; then
@@ -1543,10 +1591,12 @@ wizard_setup() {
     reuse=$(find_identity_by_login "$login") || reuse=""
     if [[ -n "$token_file" ]]; then
       wz_done "Token" "$token_file (from --token-file)"
+    elif [[ -n "$op_item" ]]; then
+      wz_done "Token" "$op_item (from --op-item)"
     elif [[ -n "$reuse" ]] && wz_yes "A token for @$login is already stored. Reuse it?" y; then
       : # the main path finds it by login, exactly as a bare re-run does
     else
-      wz_ask_token
+      wz_ask_secret
     fi
   fi
 
@@ -1566,7 +1616,7 @@ wizard_setup() {
   else
     wz_ask_store
   fi
-  ! op_backed "$store" || wz_ask_vault
+  [[ -n "$op_item" ]] || ! op_backed "$store" || wz_ask_vault
 
   wz_section "Where it lives"
   if [[ "$kind" == "user" ]]; then derived="$login"; else derived="named after the app"; fi
@@ -1596,7 +1646,7 @@ wizard_setup() {
 
 cmd_setup() {
   local owner="" app_id="" pem="" name="" vault="$VAULT" coauthor="" base="" op_account="" store=""
-  local kind="" login="" token_file="" make_default="" sign=""
+  local kind="" login="" token_file="" make_default="" sign="" op_item="" vault_given=""
   # Set by the wizard only: a token it read from its own prompt, carried in
   # this process rather than through argv or a file on the way to its store.
   local wizard="" wizard_token="" argc=$#
@@ -1612,8 +1662,9 @@ cmd_setup() {
       --token-file) token_file="$2"; shift 2 ;;
       --name)       name="$2"; shift 2 ;;
       --store)      store="$2"; shift 2 ;;
-      --vault)      vault="$2"; shift 2 ;;
+      --vault)      vault="$2"; vault_given=1; shift 2 ;;
       --op-account) op_account="$2"; shift 2 ;;
+      --op-item)    op_item="$2"; shift 2 ;;
       --coauthor)   coauthor="$2"; shift 2 ;;
       --base-dir)   base="$2"; shift 2 ;;
       --default)    make_default=1; shift ;;
@@ -1644,6 +1695,12 @@ cmd_setup() {
   fi
   [[ -z "$store" || "$store" == "file" ]] || op_backed "$store" \
     || die "--store must be 'file', 'op' or 'op-cache', got '$store'"
+  if [[ -n "$op_item" ]]; then
+    local ref_re='^op://[^/]+/[^/]+$'
+    [[ "$op_item" =~ $ref_re ]] || die "--op-item takes op://<vault>/<item>, got '$op_item'"
+    [[ "$store" != "file" ]] || die "--op-item names a 1Password item -- it can't go with --store file"
+    command -v op >/dev/null || die "missing dependency: op (--op-item reads from 1Password)"
+  fi
 
   # Whose stored settings a re-run may reuse: the named identity, or the
   # default when no name was given (which is the one it would derive anyway).
@@ -1684,7 +1741,8 @@ cmd_setup() {
   fi
 
   # Filled in by whichever discovery branch runs below.
-  local secret_material="" secret_source="" secret_path="" op_title="" op_item=""
+  # secret_item is the 1Password item the secret was read from, if any.
+  local secret_material="" secret_source="" secret_path="" op_title="" secret_item=""
   local slug="" install_id="" bot_user_id="" user_id="" expires=""
 
   if [[ "$kind" == "user" ]]; then
@@ -1698,6 +1756,10 @@ cmd_setup() {
       secret_source="file"
     elif [[ -n "$wizard_token" ]]; then
       secret_material="$wizard_token"
+    elif [[ -n "$op_item" ]]; then
+      secret_material=$(op_do read "$op_item/token") \
+        || die "could not read a token field from $op_item -- op signin, or check the item"
+      secret_item="$op_item"
     else
       if [[ "$(identity_kind "$probe")" == "user" ]] \
          && cfg_get "identity.$probe.login" >/dev/null; then
@@ -1708,6 +1770,7 @@ cmd_setup() {
       if [[ -n "$token_owner" ]]; then
         secret_material=$(read_identity_secret "$token_owner") \
           || die "could not read stored token of identity '$token_owner' -- pass --token-file to store a fresh one"
+        secret_item=$(cfg_get "identity.$token_owner.opitem" || true)
       else
         ask_secret secret_material "Personal access token for the agent account"
       fi
@@ -1772,6 +1835,10 @@ cmd_setup() {
       openssl pkey -in "$pem" -noout 2>/dev/null || die "$pem is not a valid private key"
       secret_material=$(cat "$pem")
       secret_source="file"
+    elif [[ -n "$op_item" ]]; then
+      secret_material=$(op_do read "$op_item/private_key") \
+        || die "could not read a private_key field from $op_item -- op signin, or check the item"
+      secret_item="$op_item"
     else
       if [[ -n "$name" ]] && [[ "$(cfg_get "identity.$name.appid")" == "$app_id" ]]; then
         key_owner="$name"
@@ -1782,6 +1849,7 @@ cmd_setup() {
         || die "no --pem given and no stored key for app $app_id -- pass --pem <downloaded .pem>"
       secret_material=$(read_identity_secret "$key_owner") \
         || die "could not read stored key of identity '$key_owner' -- pass --pem to store a fresh one"
+      secret_item=$(cfg_get "identity.$key_owner.opitem" || true)
     fi
 
     # --- discover slug, installation id, bot user id -----------------------
@@ -1838,6 +1906,7 @@ cmd_setup() {
   # whatever unrelated identity happened to be the default.
   if [[ -z "$store" ]]; then
     if identity_exists "$name"; then store=$(key_source "$name"); else store="file"; fi
+    [[ -z "$op_item" ]] || op_backed "$store" || store="op"
   fi
 
   # --- commit signing -------------------------------------------------------
@@ -1882,6 +1951,14 @@ cmd_setup() {
     [[ -n "$op_account" ]] || op_account=$(cfg_get "identity.$name.opaccount" || true)
     [[ -n "$op_account" ]] \
       || op_account=$(op account get --format json 2>/dev/null | jq -r '.id // empty') || true
+    # A re-run leaves the item where it is: only --vault or --op-item moves it.
+    [[ -n "$op_item" || -n "$vault_given" ]] || op_item=$(cfg_get "identity.$name.opitem" || true)
+    if [[ -n "$op_item" ]]; then
+      vault=${op_item#op://}; vault=${vault%%/*}
+      op_title=${op_item#op://*/}
+    else
+      op_item="op://$vault/$op_title"
+    fi
     # Not `op whoami`: it reports session-token state and fails under the
     # desktop app's biometric integration even when real operations work.
     op_do vault get "$vault" >/dev/null 2>&1 \
@@ -1895,16 +1972,19 @@ cmd_setup() {
                  "private_key[concealed]=$secret_material")
       readback_field="app_id"; readback_value="$app_id"
     fi
-    op_item="op://$vault/$op_title"
-    say "==> storing credentials in 1Password ($op_item)"
-    if op_do item get "$op_title" --vault "$vault" >/dev/null 2>&1; then
-      op_do item edit "$op_title" --vault "$vault" "${op_fields[@]}" >/dev/null
+    if [[ "$op_item" == "$secret_item" ]]; then
+      say "==> using the credentials already in 1Password ($op_item)"
     else
-      op_do item create --category "API Credential" --title "$op_title" --vault "$vault" \
-        "${op_fields[@]}" >/dev/null
+      say "==> storing credentials in 1Password ($op_item)"
+      if op_do item get "$op_title" --vault "$vault" >/dev/null 2>&1; then
+        op_do item edit "$op_title" --vault "$vault" "${op_fields[@]}" >/dev/null
+      else
+        op_do item create --category "API Credential" --title "$op_title" --vault "$vault" \
+          "${op_fields[@]}" >/dev/null
+      fi
+      [[ "$(op_do read "$op_item/$readback_field")" == "$readback_value" ]] \
+        || die "1Password readback failed for $op_item/$readback_field"
     fi
-    [[ "$(op_do read "$op_item/$readback_field")" == "$readback_value" ]] \
-      || die "1Password readback failed for $op_item/$readback_field"
     # op-cache remembers a reference until its daemon exits and can't forget
     # just one, so a rotated secret would otherwise keep answering as the old
     # one for the rest of the session.
@@ -2069,12 +2149,10 @@ chk_op() { # name field
 }
 chk_op_pinned() { cfg_get "identity.$1.opaccount" >/dev/null; }
 op_hint() { # name -> what to do when its 1Password secret can't be read
-  if [[ "$(key_source "$1")" == "op-cache" ]]; then
-    printf 'op signin, install op-cache (brew install PatrickTulskie/tap/op-cache), or re-run setup to recreate %s' \
-      "$(cfg_get "identity.$1.opitem")"
-  else
-    printf 'op signin, or re-run setup to recreate %s' "$(cfg_get "identity.$1.opitem")"
-  fi
+  [[ "$(key_source "$1")" != "op-cache" ]] \
+    || printf 'install op-cache (brew install PatrickTulskie/tap/op-cache), '
+  printf "op signin, or if %s moved: guise setup --name %s --op-item op://<vault>/<item>" \
+    "$(cfg_get "identity.$1.opitem")" "$1"
 }
 chk_keyfile() {
   local f
@@ -3132,6 +3210,11 @@ usage: guise <command> [flags]
                                     default account: the one op answers
                                     for now, pinned so a second sign-in
                                     can't take over its reads
+               [--op-item op://<vault>/<item>]
+                                    use the secret already in this item
+                                    (its token field, or private_key for
+                                    an app) instead of writing one; a new
+                                    --token-file or --pem goes into it
                [--coauthor "Name <email>"] [--base-dir <dir>]
                [--wizard]   ask for the answers instead of taking flags;
                             this is what a bare "guise setup" does on a
