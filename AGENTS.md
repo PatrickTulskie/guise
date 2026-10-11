@@ -80,7 +80,7 @@ rather than recorded fixtures:
 
 | Stub | Stands in for | Driven by |
 |---|---|---|
-| `tests/stubs/op` | 1Password CLI, backed by files under `$OP_FAKE_DIR/<vault>/<item>/<field>` | `OP_FAKE_ACCOUNT`, `OP_FAKE_FORBID` (assert op is never called) |
+| `tests/stubs/op` | 1Password CLI, backed by files under `$OP_FAKE_DIR/<vault>/<item>/<field>` | `OP_FAKE_ACCOUNT`, `OP_FAKE_DEFAULT` (the account op falls back to with no `--account`; any other than `OP_FAKE_ACCOUNT` holds no items), `OP_FAKE_FORBID` (assert op is never called) |
 | `tests/stubs/op-cache` | op-cache, with `$OP_CACHE_FAKE_DIR` standing in for the daemon's memory; a miss falls through to the op stub | `OP_CACHE_LOG` (every call, so a test can tell a cached read from a direct one) |
 | `tests/stubs/curl` | the GitHub API, matched on URL, every call logged to `$CURL_LOG` | `FAKE_APP_ID`, `FAKE_SLUG`, `FAKE_OWNER`, `FAKE_BOT_ID`, `FAKE_LOGIN`, `FAKE_USER_ID`, `FAKE_TOKEN_EXPIRES`, `FAKE_REPO_COUNT` |
 | `tests/stubs/gh` | `gh api user` only, to answer "is this the human's own account?" | `FAKE_GH_LOGIN` (unset = logged out, which must warn, not block) |

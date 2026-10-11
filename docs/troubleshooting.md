@@ -222,6 +222,22 @@ If minting itself fails: `guise token` prints the error. Usual causes are
 `guise warm-cache` takes for you), the app uninstalled, or a rotated private
 key (re-run `setup --pem` with the new download).
 
+## 1Password can't find the item after you signed in to another account
+
+**Cause:** the identity isn't pinned to a 1Password account, so its reads go to
+whichever one `op` defaults to — and once a second account (a work one, say) is
+signed in, that can be the account without the item. The error reads
+`"<item>" isn't an item in the "<vault>" vault`, even though the vault is right
+there in the account you meant. `doctor` warns "1Password account pinned" on
+such an identity before it breaks.
+
+```bash
+guise setup --name <identity> --op-account my.1password.com
+```
+
+pins it (`op account list` shows the accounts). Setup pins one on its own, so
+this only hits an identity set up before it did.
+
 ## An unattended agent is stuck on a 1Password prompt
 
 **Cause:** the identity reads through op-cache (`--store op-cache`), which

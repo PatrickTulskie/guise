@@ -172,6 +172,12 @@ lands on disk, which makes it safe to run from a login item before you start
 dispatching agents. It exits non-zero if a vault it needs is out of reach,
 rather than leaving you to find out at commit time.
 
+Either 1Password store pins the account the item lives in: `--op-account`, or
+whichever account `op` answers for when setup runs. Signing in to a second
+account later — a work one, say — would otherwise change which account an
+unqualified read goes to. `doctor` warns about an identity set up before
+pinning existed; re-running its setup pins it.
+
 Moving an identity between stores is a re-run of `setup` with a different
 `--store`. Into 1Password (`op` or `op-cache`) from a file shreds the file once
 the move lands; between `op` and `op-cache` only the reader changes and the
