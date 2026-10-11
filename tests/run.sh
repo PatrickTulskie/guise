@@ -456,7 +456,7 @@ expect_eq "keeping the store it had" "$(cfg identity.$USER_IDENT.keysource)" "op
 expect_eq "and the token reads from there" \
   "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_stub123"
 mv "$OP_FAKE_DIR/agents/Moved" "$OP_FAKE_DIR/agents/MovedAgain"
-OP_FAKE_DEFAULT=work.1password.com run_setup_user --name "$USER_IDENT" \
+OP_FAKE_DEFAULT=work.1password.com agent setup --name "$USER_IDENT" \
   --op-item op://agents/MovedAgain >/dev/null 2>&1
 expect_eq "and reads it through the account the identity is pinned to" "$?" "0"
 
@@ -504,6 +504,10 @@ run_setup --op-item op://agents/AppKey >/dev/null 2>&1
 expect_eq "an app identity can start from an item holding its key" "$?" "0"
 agent doctor --name "$APP_IDENT" >/dev/null 2>&1
 expect_eq "and mints with it" "$?" "0"
+mv "$OP_FAKE_DIR/agents/AppKey" "$OP_FAKE_DIR/agents/AppKeyMoved"
+OP_FAKE_DEFAULT=work.1password.com agent setup --name "$APP_IDENT" \
+  --op-item op://agents/AppKeyMoved >/dev/null 2>&1
+expect_eq "and reads a moved one through the account it is pinned to" "$?" "0"
 
 # --- op-cache key store ------------------------------------------------------
 # The same 1Password item an op store uses; what changes is that reads go
