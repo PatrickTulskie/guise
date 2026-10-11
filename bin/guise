@@ -198,7 +198,10 @@ op_reader() { if [[ "$(key_source "$1")" == "op-cache" ]]; then printf 'op-cache
 op_read() { # name field -> the field's value on stdout
   local acct item reader
   item=$(cfg_get "identity.$1.opitem") || return 1
-  acct=$(cfg_get "identity.$1.opaccount") || acct=""
+  # Inside setup, an --op-account names the account the stored item is in,
+  # which is how an identity that never had one gets its reads back.
+  acct=${op_account:-}
+  [[ -n "$acct" ]] || acct=$(cfg_get "identity.$1.opaccount") || acct=""
   reader=$(op_reader "$1")
   command -v "$reader" >/dev/null \
     || die "missing dependency: $reader -- identity '$1' reads its secret from 1Password through it"
@@ -1870,6 +1873,11 @@ cmd_setup() {
     command -v op >/dev/null || die "missing dependency: op (or use --store file to keep the secret on disk)"
     [[ "$store" != "op-cache" ]] || command -v op-cache >/dev/null \
       || die "missing dependency: op-cache (brew install PatrickTulskie/tap/op-cache, or use --store op)"
+    # Unpinned, every read goes to whichever account op defaults to, and signing
+    # in to a second account can change that answer out from under the item.
+    [[ -n "$op_account" ]] || op_account=$(cfg_get "identity.$name.opaccount" || true)
+    [[ -n "$op_account" ]] \
+      || op_account=$(op account get --format json 2>/dev/null | jq -r '.id // empty') || true
     # Not `op whoami`: it reports session-token state and fails under the
     # desktop app's biometric integration even when real operations work.
     op_do vault get "$vault" >/dev/null 2>&1 \
@@ -2055,6 +2063,7 @@ chk_op() { # name field
   command -v "$(op_reader "$1")" >/dev/null || return 1
   op_read "$1" "$2" >/dev/null
 }
+chk_op_pinned() { cfg_get "identity.$1.opaccount" >/dev/null; }
 op_hint() { # name -> what to do when its 1Password secret can't be read
   if [[ "$(key_source "$1")" == "op-cache" ]]; then
     printf 'op signin, install op-cache (brew install PatrickTulskie/tap/op-cache), or re-run setup to recreate %s' \
@@ -2286,6 +2295,9 @@ cmd_doctor() {
       else
         check "1Password token reachable through $(op_reader "$name")" \
               "$(op_hint "$name")" chk_op "$name" token
+        note  "1Password account pinned" \
+              "re-run 'guise setup --name $name' -- unpinned, a second signed-in 1Password account can take over its reads" \
+              chk_op_pinned "$name"
       fi
       check "stored token looks like a PAT (github_pat_... / ghp_...)" \
             "the stored secret isn't a PAT -- re-run setup with a fresh --token-file" chk_token "$name"
@@ -2307,6 +2319,9 @@ cmd_doctor() {
       else
         check "1Password key reachable through $(op_reader "$name")" \
               "$(op_hint "$name")" chk_op "$name" private_key
+        note  "1Password account pinned" \
+              "re-run 'guise setup --name $name' -- unpinned, a second signed-in 1Password account can take over its reads" \
+              chk_op_pinned "$name"
       fi
       check "token mints (ghs_...)" \
             "wrong app id / installation id / PEM -- re-run setup with a fresh --pem" chk_token "$name"
@@ -3110,6 +3125,9 @@ usage: guise <command> [flags]
                                     identity already uses; a different one
                                     moves the secret
                [--vault <1password vault>] [--op-account <1password account>]
+                                    default account: the one op answers
+                                    for now, pinned so a second sign-in
+                                    can't take over its reads
                [--coauthor "Name <email>"] [--base-dir <dir>]
                [--wizard]   ask for the answers instead of taking flags;
                             this is what a bare "guise setup" does on a

@@ -339,6 +339,35 @@ expect_eq "both identities in the owned gitconfig" \
 "$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes with both kinds present" "$?" "0"
 
+# --- 1Password account pinning -----------------------------------------------
+# Unpinned, reads go to whichever account op defaults to, which signing in to a
+# second one can change.
+echo "1Password account pinning:"
+new_sandbox
+new_token_file "$SB/pat.txt"
+agent setup --kind user --store op --token-file "$SB/pat.txt" >/dev/null 2>&1
+expect_eq "setup with no --op-account pins the account op answered for" \
+  "$(cfg identity.$USER_IDENT.opaccount)" "my.1password.com"
+OP_FAKE_DEFAULT=work.1password.com agent setup --kind user >/dev/null 2>&1
+expect_eq "a re-run once another account is op's default exits 0" "$?" "0"
+expect_eq "and keeps the account it pinned" \
+  "$(cfg identity.$USER_IDENT.opaccount)" "my.1password.com"
+git config -f "$HOME/.config/guise/config" --unset identity.$USER_IDENT.opaccount
+agent doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+expect_eq "doctor still passes for an identity set up before pinning" "$?" "0"
+expect "but warns it is unpinned" grep -q "warn  1Password account pinned" "$SB/doctor.out"
+agent setup --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "re-running its setup pins it" \
+  "$(cfg identity.$USER_IDENT.opaccount)" "my.1password.com"
+git config -f "$HOME/.config/guise/config" --unset identity.$USER_IDENT.opaccount
+OP_FAKE_DEFAULT=work.1password.com agent doctor --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "unpinned, its reads break once another account is op's default" "$?" "1"
+OP_FAKE_DEFAULT=work.1password.com agent setup --name "$USER_IDENT" \
+  --op-account my.1password.com >/dev/null 2>&1
+expect_eq "and setup with --op-account reads it back from the right one" "$?" "0"
+OP_FAKE_DEFAULT=work.1password.com agent doctor --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "leaving it pinned there" "$?" "0"
+
 # --- user identity guardrails ------------------------------------------------
 echo "user identity guardrails:"
 printf 'github_pat_other\n' > "$SB/pat2.txt"
