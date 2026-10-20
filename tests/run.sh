@@ -283,6 +283,22 @@ agent update >/dev/null 2>&1
 agent doctor >/dev/null 2>&1
 expect_eq "doctor passes once update reinstalls guise-gh" "$?" "0"
 
+# --- PATH ----------------------------------------------------------------------
+# Agents are told to use guise-gh, and one whose shell cannot find it reaches
+# for plain gh, as the human -- so setup calls out a PATH without ~/.local/bin.
+echo "PATH:"
+new_sandbox
+# REAL_PATH may carry the developer's own install, which would resolve in place
+# of the sandbox's; drop those directories so nothing named guise does.
+nobin="$ROOT/tests/stubs"
+IFS=: read -r -a dirs <<<"$REAL_PATH"
+for d in "${dirs[@]}"; do [[ -e "$d/guise" || -e "$d/guise-gh" ]] || nobin="$nobin:$d"; done
+PATH="$nobin" run_setup --store file --pem "$SB/key.pem" > "$SB/setup.out" 2>&1
+expect "setup calls out that ~/.local/bin is off PATH, naming the rc" \
+  grep -qF 'Add this line to ~/.zshrc' "$SB/setup.out"
+expect "and gives the line to add" \
+  grep -qF 'export PATH="$HOME/.local/bin:$PATH"' "$SB/setup.out"
+
 # --- file key store ----------------------------------------------------------
 echo "file key store:"
 new_sandbox

@@ -719,10 +719,27 @@ install_binaries() {
     cp "$SCRIPT_PATH" "$BIN_DIR/guise"
     chmod 755 "$BIN_DIR/guise"
   fi
-  case ":$PATH:" in
-    *":$BIN_DIR:"*) ;;
-    *) warn "$BIN_DIR is not on your PATH -- add it to your shell profile" ;;
-  esac
+}
+
+bin_dir_on_path() { case ":$PATH:" in *":$BIN_DIR:"*) return 0 ;; esac; return 1; }
+
+path_line() { printf 'export PATH="$HOME%s:$PATH"' "${BIN_DIR#"$HOME"}"; }
+
+rc_display() {
+  local rc
+  if rc=$(shell_rc); then display_path "$rc"; else printf "your shell's startup file"; fi
+}
+
+# An agent whose shell can't find guise-gh reaches for plain gh, which is the
+# human's login -- so a PATH without $BIN_DIR gets more than a warning.
+path_callout() {
+  bin_dir_on_path && return 0
+  say ""
+  say "!!  $(display_path "$BIN_DIR") is not on your PATH, so guise-gh and guise won't be found"
+  say "    -- and an agent that can't find guise-gh falls back to plain gh, as YOU."
+  say "    Add this line to $(rc_display), then open a new shell:"
+  say ""
+  say "        $(path_line)"
 }
 
 install_hook() {
@@ -2124,6 +2141,7 @@ cmd_setup() {
     say "    'guise use' cds this shell once $(display_path "$rc_path") is reloaded"
     say "    -- open a new shell, or: . $(display_path "$rc_path")"
   fi
+  path_callout
   say ""
   if [[ "$wizard" != "1" ]]; then
     cmd_doctor --name "$name"
@@ -2838,6 +2856,7 @@ cmd_update() {
   regen_owned_gitconfig
   ensure_include_block
   say "re-rendered $count identity conf(s) in $RENDER_DIR"
+  path_callout
   say ""
   say "config and stored secrets untouched -- run 'guise doctor' to verify the chain"
 }

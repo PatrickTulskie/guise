@@ -123,7 +123,8 @@ Setup calls `GET /user` to discover the account's login and numeric user ID,
 **refuses the token if it belongs to your own account**, stores it (in a file
 by default, or `--store op`), and shreds `/tmp/pat`. The identity is named
 after the account, so commits under `~/agentic-code/<login>/` are authored by
-it, still with you as co-author. Helper binaries land in `~/.local/bin`, and
+it, still with you as co-author. Helper binaries land in `~/.local/bin`, which
+has to be on `PATH` (setup says so, with the line to add, when it isn't), and
 setup drops an `AGENTS.md` (and a `CLAUDE.md` importing it) into
 `~/agentic-code/` telling harnesses to use `guise-gh` — harnesses that stack
 context files up the directory tree pick it up for every repo underneath; it
