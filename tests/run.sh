@@ -76,6 +76,8 @@ git_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 # Git Bash mounts NTFS noacl: chmod is a no-op and every file reads 644.
 modes_apply() { case "$(uname -s)" in MINGW*|MSYS*) return 1 ;; *) return 0 ;; esac; }
+# Root ignores modes as well, and the WSL runner is root.
+perms_enforced() { modes_apply && [[ "$(id -u)" != 0 ]]; }
 expect_mode() { # desc file mode
   if modes_apply; then expect_eq "$1" "$(file_mode "$2")" "$3"
   else skip "$1 (no POSIX modes on this filesystem)"; fi
@@ -1152,18 +1154,23 @@ expect "the rest of the install stays for the next setup" \
   grep -q "guise" "$HOME/.gitconfig"
 
 # A cleanup that fails stops rm after the config section is gone, so the clones
-# it strands have to be on doctor's list by then, not only at the end.
-new_token_file "$SB/pat.txt"
-run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
-agent basedir "$HOME/solo" --name "$USER_IDENT" >/dev/null 2>&1
-user_dir="$HOME/solo/$USER_IDENT"
-git init -q "$user_dir/kept"
-chmod 500 "$keys"
-expect_fail "rm --secret fails when the token can't be shredded" agent rm "$USER_IDENT" --secret
-chmod 700 "$keys"
-expect_eq "with the config section already gone" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
-agent doctor > "$SB/rm.doctor" 2>&1
-expect "and doctor still lists the clone it left behind" grep -q "$user_dir/kept" "$SB/rm.doctor"
+# it strands have to be on doctor's list by then, not only at the end. The
+# failure is a directory nobody may write to, which takes enforced modes.
+if perms_enforced; then
+  new_token_file "$SB/pat.txt"
+  run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
+  agent basedir "$HOME/solo" --name "$USER_IDENT" >/dev/null 2>&1
+  user_dir="$HOME/solo/$USER_IDENT"
+  git init -q "$user_dir/kept"
+  chmod 500 "$keys"
+  expect_fail "rm --secret fails when the token can't be shredded" agent rm "$USER_IDENT" --secret
+  chmod 700 "$keys"
+  expect_eq "with the config section already gone" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
+  agent doctor > "$SB/rm.doctor" 2>&1
+  expect "and doctor still lists the clone it left behind" grep -q "$user_dir/kept" "$SB/rm.doctor"
+else
+  skip "rm --secret fails when the token can't be shredded (modes are not enforced here)"
+fi
 
 # A workspace deleted by hand before rm is nothing to scan, not a reason to stop.
 new_token_file "$SB/pat.txt"
