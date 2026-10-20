@@ -3275,11 +3275,15 @@ cmd_rm() {
     wizard=1
   fi
   WZ_CMD="rm"
+  # The wizard warns about unpushed work before it asks; a --code flag skips
+  # that question, so the warning has to come from here instead.
+  local unsaved="" flagged_code="$code"
   [[ -z "$wizard" ]] || wz_rm
   [[ -n "$name" ]] || die "usage: guise rm <identity> [--keep | --code --secret --signing-key | --force]"
 
   local dir keyfile signkey nested was_default="" left count
   dir=$(identity_dir "$name")
+  [[ -z "$flagged_code" ]] || unsaved=$(unsaved_clones "$name")
   keyfile=$(secret_file "$name") || keyfile=""
   signkey=$(signing_key "$name")
   if [[ -n "$code" ]] && nested=$(identity_nested_in "$name"); then
@@ -3317,6 +3321,10 @@ cmd_rm() {
     shred_signing_key "$signkey"
   fi
   if [[ -n "$code" && -d "$dir" ]]; then
+    if [[ -n "$unsaved" ]]; then
+      warn "deleting work that isn't pushed anywhere:"
+      printf '%s\n' "$unsaved" | sed 's/^/  /' >&2
+    fi
     rm -rf "$dir"
     stranded_forget "$dir"
     say "deleted $dir"

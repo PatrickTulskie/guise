@@ -414,7 +414,9 @@ question, and a flag for when there is no terminal to ask on:
 
 With no flags and no terminal, `rm` refuses rather than guess. A 1Password item
 is yours, not guise's, so it stays whatever you pass. `--code` refuses when
-another identity's workspace sits inside the directory it would delete.
+another identity's workspace sits inside the directory it would delete, and
+warns on stderr about any clone holding uncommitted or unpushed work before
+deleting it -- the flag is the answer, so it does not stop to ask.
 
 Clones you keep fall out of `includeIf` scope and **start committing as you**,
 the same as a clone left behind by a workspace move. `guise doctor` lists them.
