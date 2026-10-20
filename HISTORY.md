@@ -1,3 +1,25 @@
+## 0.6.0
+
+### Added
+
+* `guise triage`, so a problem `doctor` can't explain gets an agent briefed on the source and the machine (#33)
+* `guise cp`, so a second workspace for the same account reuses its secret and signing key instead of a second setup (#39)
+* `guise setup-hooks`, so a repo that pins its own `core.hooksPath` keeps both its hooks and the co-author trailer (#40)
+* Windows support, in Git Bash and WSL (#38)
+* `doctor` catches a PAT no SAML org has authorized, a fail-open `guise-gh`, a dangling default identity and a cached PAT (#35)
+* `doctor` fails when `guise-gh` doesn't resolve to the installed helper, and `setup` names the `PATH` line to add when `~/.local/bin` is missing (#37)
+
+### Changed
+
+* `--store op` and `op-cache` need 1Password CLI 2.30 or newer (#36)
+
+### Fixed
+
+* Agent commits run a repo's own `.git/hooks` alongside guise's instead of skipping them (#40)
+* The secret stays out of `op`'s and `curl`'s argv, where `ps` showed it to the agent (#36)
+* `setup` reads a reused secret through its owner's 1Password account, keeps an explicit `--op-account` through a wizard review, and stores the secret again when the same item path is in another account (#41)
+* `rm` records a removed identity's directory before cleanup, and a flag-driven `rm --code` warns before deleting unpushed work (#34)
+
 ## 0.5.0
 
 ### Added
