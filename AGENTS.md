@@ -82,9 +82,9 @@ rather than recorded fixtures:
 
 | Stub | Stands in for | Driven by |
 |---|---|---|
-| `tests/stubs/op` | 1Password CLI, backed by files under `$OP_FAKE_DIR/<vault>/<item>/<field>` | `OP_FAKE_ACCOUNT`, `OP_FAKE_DEFAULT` (the account op falls back to with no `--account`; any other than `OP_FAKE_ACCOUNT` holds no items), `OP_FAKE_FORBID` (assert op is never called) |
+| `tests/stubs/op` | 1Password CLI, backed by files under `$OP_FAKE_DIR/<vault>/<item>/<field>` (a field's type under `<item>/.type/<field>`); `item get --format json` conceals a value unless `--reveal` asks for it, and `item create`/`item edit` take a JSON template on stdin | `OP_FAKE_ACCOUNT`, `OP_FAKE_DEFAULT` (the account op falls back to with no `--account`; any other than `OP_FAKE_ACCOUNT` holds no items), `OP_FAKE_FORBID` (assert op is never called), `OP_FAKE_VERSION` (what `--version` reports; default 2.30.0), `OP_ARGV_LOG` (every call's argv, so a test can prove a secret never passed through it) |
 | `tests/stubs/op-cache` | op-cache, with `$OP_CACHE_FAKE_DIR` standing in for the daemon's memory; a miss falls through to the op stub | `OP_CACHE_LOG` (every call, so a test can tell a cached read from a direct one) |
-| `tests/stubs/curl` | the GitHub API, matched on URL, every call logged to `$CURL_LOG` | `FAKE_APP_ID`, `FAKE_SLUG`, `FAKE_OWNER`, `FAKE_BOT_ID`, `FAKE_LOGIN`, `FAKE_USER_ID`, `FAKE_TOKEN_EXPIRES`, `FAKE_REPO_COUNT` |
+| `tests/stubs/curl` | the GitHub API, matched on URL, every call logged to `$CURL_LOG`; an endpoint that needs auth fails (exit 22) unless its `Authorization` header came through `--config`, and any `Authorization:` in argv fails outright | `FAKE_APP_ID`, `FAKE_SLUG`, `FAKE_OWNER`, `FAKE_BOT_ID`, `FAKE_LOGIN`, `FAKE_USER_ID`, `FAKE_TOKEN_EXPIRES`, `FAKE_REPO_COUNT` |
 | `tests/stubs/gh` | `gh api user` only, to answer "is this the human's own account?" | `FAKE_GH_LOGIN` (unset = logged out, which must warn, not block) |
 | `tests/stubs/stat` | real `stat` until asked otherwise, then GNU semantics | `FAKE_STAT_GNU` (makes a macOS run exercise the GNU branch of `file_mode`) |
 
@@ -157,9 +157,10 @@ The whole point of this tool is credential separation, so:
 
 - **Never put a secret in argv.** `ps` shows arguments to same-user processes,
   and the agent runs as the same user. Feed subprocesses through a
-  builtin-driven process substitution — `curl --config <(printf ...)`,
-  `openssl dgst -sha256 -sign <(read_key) -binary` — never
-  `-H "Authorization: ..."`.
+  builtin-driven process substitution or a pipe — `curl --config <(printf ...)`,
+  `openssl dgst -sha256 -sign <(read_key) -binary`, a JSON template piped into
+  `op item edit` — never `-H "Authorization: ..."`, an `op` assignment
+  statement, or `jq --arg`.
 - Secrets live in 1Password, or on disk at mode 600 under
   `~/.config/guise/keys/`. Never under the agent workspace: agents roam there
   and can commit what they read.

@@ -279,6 +279,23 @@ points it at where the item lives now, without touching the item. It needs a
 `token` field (`private_key` for an app). Running `guise setup` and reviewing
 the identity does the same: it notices the item is gone and asks where it went.
 
+## Setup stops: "op 2.x is too old"
+
+**Cause:** `--store op` and `--store op-cache` write the secret into the item
+through a JSON template on `op`'s stdin — as a command argument it would show
+up in `ps` for every process you run, the agent's included — and first read the
+item back revealed so its other concealed fields survive the round trip. That
+takes 1Password CLI 2.30 or newer. Setup checks before it writes or shreds
+anything, so the token file or PEM is still where you left it.
+
+```bash
+brew upgrade 1password-cli      # or 1Password's installer for your platform
+guise setup ...                 # the same command again
+```
+
+`--store file` keeps the secret on disk under `~/.config/guise/keys/` instead
+and has no such floor.
+
 ## An unattended agent is stuck on a 1Password prompt
 
 **Cause:** the identity reads through op-cache (`--store op-cache`), which
