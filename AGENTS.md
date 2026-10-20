@@ -71,9 +71,11 @@ bash tests/run.sh                 # ~2min, no network
 docker compose run --rm tests     # the same suite, on Linux
 ```
 
-Green is the merge gate; CI runs exactly this on every PR, on macOS and on
-Linux: macOS is the bash 3.2 and BSD floor described below, Linux is the GNU
-tooling cloud-hosted agents run on. The harness gives each scenario a fresh
+Green is the merge gate; CI runs exactly this on every PR, on macOS, on
+Linux, on Windows in Git Bash, and on Windows inside WSL: macOS is the bash
+3.2 and BSD floor described below, Linux is the GNU tooling cloud-hosted
+agents run on, Git Bash is the MSYS environment described further down, and
+WSL is Linux with the checkout on the Windows disk. The harness gives each scenario a fresh
 sandbox: `$HOME` under `mktemp -d`, `$PATH` prefixed with `tests/stubs`, and
 real git/openssl/jq.
 
@@ -237,5 +239,5 @@ tests/run.sh             the whole suite, in a sandboxed $HOME
 tests/stubs/{op,curl,gh} the outside world
 docs/troubleshooting.md  keyed to real failure modes
 compose.yaml, docker/    a disposable machine to run the tool against by hand
-.github/workflows/       CI: the suite, on macOS and Linux, on every PR
+.github/workflows/       CI: the suite, on macOS, Linux, Git Bash and WSL, on every PR
 ```
