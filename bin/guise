@@ -2373,6 +2373,72 @@ chk_default_exists() {
   identity_exists "$d"
 }
 
+# What a shell calling $1 would run. Aliases are invisible to a non-interactive
+# bash, but an exported function is imported and wins over any file, so doctor
+# sees it the way the agent's shell does.
+resolve_cmd() {
+  case "$(type -t "$1" 2>/dev/null || true)" in
+    function) printf function ;;
+    file)     type -P "$1" ;;
+  esac
+}
+
+chk_helpers_resolve() {
+  local b found
+  for b in $HELPERS; do
+    found=$(resolve_cmd "$b")
+    [[ -n "$found" && "$found" != function && "$found" -ef "$BIN_DIR/$b" ]] || return 1
+  done
+}
+
+helpers_hint() {
+  local b found
+  if ! bin_dir_on_path; then
+    printf '%s is not on PATH -- add this to %s, then open a new shell:  %s' \
+      "$(display_path "$BIN_DIR")" "$(rc_display)" "$(path_line)"
+    return 0
+  fi
+  for b in $HELPERS; do
+    found=$(resolve_cmd "$b")
+    case "$found" in
+      "")       printf "%s is missing -- run 'guise update'" "$BIN_DIR/$b"; return 0 ;;
+      function) printf 'a shell function named %s shadows %s -- unset -f %s, and take its definition (and any export -f) out of your shell config' \
+                  "$b" "$BIN_DIR/$b" "$b"; return 0 ;;
+    esac
+    [[ "$found" -ef "$BIN_DIR/$b" ]] || {
+      printf '%s shadows %s -- remove it, or put %s ahead of %s on PATH' \
+        "$found" "$BIN_DIR/$b" "$(display_path "$BIN_DIR")" "$(display_path "${found%/*}")"
+      return 0
+    }
+  done
+}
+
+chk_guise_on_path() { type -P guise >/dev/null; }
+
+guise_path_hint() {
+  if bin_dir_on_path; then
+    printf "%s/guise is missing -- run './bin/guise update' from a checkout to reinstall it" "$(display_path "$BIN_DIR")"
+  else
+    printf 'add this to %s, then open a new shell:  %s' "$(rc_display)" "$(path_line)"
+  fi
+}
+
+# The copy an agent runs is whichever `guise` PATH finds, and after an upgrade
+# that is often not the one doctor is running from.
+chk_guise_current() {
+  local found
+  found=$(type -P guise) || return 1
+  [[ "$found" -ef "$SCRIPT_PATH" ]] && return 0
+  [[ "$("$found" --version 2>/dev/null)" == "guise $VERSION" ]]
+}
+
+guise_version_hint() {
+  local found
+  found=$(type -P guise) || { printf 'nothing named guise is on PATH -- fix the check above'; return 0; }
+  printf "%s reports '%s' and this is guise %s -- run 'guise update' from the newer copy, or remove the stale one" \
+    "$found" "$("$found" --version 2>/dev/null || printf 'nothing for --version')" "$VERSION"
+}
+
 # A repo sitting in a workspace root but outside every identity directory gets
 # none of the wiring, so it commits as the human -- silently, which is the whole
 # problem. Usually the leftovers of a workspace that moved without its clones.
@@ -2426,6 +2492,12 @@ cmd_doctor() {
         "brew install the missing one" chk_deps
   check "helper binaries installed in $BIN_DIR" \
         "re-run 'guise setup'" chk_binaries
+  check "helper binaries resolve on PATH to the ones in $BIN_DIR" \
+        "$(helpers_hint)" chk_helpers_resolve
+  check "guise resolves on PATH" \
+        "$(guise_path_hint)" chk_guise_on_path
+  note  "guise on PATH is this version ($VERSION)" \
+        "$(guise_version_hint)" chk_guise_current
   check "co-author hook installed and executable" \
         "re-run 'guise setup'" chk_hook
   note  "shell hook sourced (lets 'guise use' cd this shell)" \
