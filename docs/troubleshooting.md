@@ -412,6 +412,32 @@ run gh without the identity's token" until they get one, by running the
 installed copy against a missing config with a stand-in `gh` on `PATH` and
 checking that `gh` never ran.
 
+## `guise-gh` isn't found, or runs the wrong thing
+
+**Cause:** `setup` installs the helpers into `~/.local/bin`, and the agent's
+shell finds `guise-gh` through `PATH` like anything else. If that directory
+isn't on `PATH`, `guise-gh` is "command not found", and an agent told to use it
+tends to fall back to plain `gh` — your login. If something earlier on `PATH`
+answers to the same name, that runs instead.
+
+`guise doctor` fails "helper binaries resolve on PATH" and its hint says which
+of these it is:
+
+- **Not on `PATH`.** Add `export PATH="$HOME/.local/bin:$PATH"` to your shell
+  rc (`~/.zshrc`; `~/.bash_profile` for bash on macOS) and open a new shell.
+  `setup` prints the same line when it notices.
+- **Another file ahead of it.** The hint names the path. Remove it, or move
+  `~/.local/bin` ahead of that directory.
+- **A shell function.** An `export -f guise-gh` in your rc reaches every bash
+  the agent starts, where it wins over the file. `unset -f guise-gh` and take
+  the definition out of the rc. An alias only lives in your interactive shell;
+  the agent never sees it, and neither does doctor.
+
+The next check covers `guise` itself the same way, and the note after it warns
+— without failing — when the `guise` on `PATH` is a different version from the
+one doctor is running from: a stale copy ahead on `PATH` after an upgrade.
+Run `guise update` from the newer copy, or remove the stale one.
+
 ## Your own commits broke (signing errors, wrong email)
 
 This tool never edits your global identity — everything is scoped under the
