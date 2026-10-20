@@ -2323,6 +2323,22 @@ chk_shell_hook() {
 }
 chk_binaries() { local b; for b in $HELPERS; do [[ -x "$BIN_DIR/$b" ]] || return 1; done; }
 
+# Proved against the installed copy, not the heredoc: a guise-gh written before
+# it checked the token hands gh an empty GH_TOKEN when guise-token fails, and
+# gh then runs as whoever is logged in. A config that isn't there makes the
+# token fail; a gh that only leaves a marker says whether it ran.
+chk_gh_fails_closed() {
+  local dir rc=0
+  dir=$(mktemp -d)
+  printf '#!/bin/sh\ntouch "%s/ran"\n' "$dir" > "$dir/gh"; chmod 755 "$dir/gh"
+  if PATH="$dir:$PATH" GUISE_CONFIG="$dir/no-config" GUISE_IDENTITY=doctor \
+       "$BIN_DIR/guise-gh" --version >/dev/null 2>&1 || [[ -e "$dir/ran" ]]; then
+    rc=1
+  fi
+  rm -rf "$dir"
+  return $rc
+}
+
 # A repo sitting in a workspace root but outside every identity directory gets
 # none of the wiring, so it commits as the human -- silently, which is the whole
 # problem. Usually the leftovers of a workspace that moved without its clones.
@@ -2373,6 +2389,8 @@ cmd_doctor() {
   note  "no clones stranded outside an identity directory" \
         "these commit as YOU: ${STRANDED}-- move them under an identity directory, or point the workspace back with 'guise basedir <path>'" \
         chk_no_stranded_clones
+  check "guise-gh refuses to run gh without the identity's token" \
+        "the installed guise-gh falls back to YOUR gh login when the token fails -- run 'guise update' to reinstall it" chk_gh_fails_closed
 
   local names name
   names=$(list_identities)
