@@ -474,6 +474,16 @@ FAKE_LOGIN=second-agent agent setup --kind user --store op --token-file "$SB/pat
 expect_eq "a new identity set up beside a pinned default exits 0" "$?" "0"
 expect_eq "and pins the account op answered for, not the default's" \
   "$(cfg identity.second-agent.opaccount)" "my.1password.com"
+# With no --name, --op-account speaks for the default identity, the same as
+# naming it would: its item is read from there, or nowhere.
+git config -f "$HOME/.config/guise/config" identity.$USER_IDENT.opaccount my.1password.com
+mkdir -p "$OP_FAKE_DIR/work.1password.com"
+agent setup --kind user --op-account work.1password.com > "$SB/setup.out" 2>&1
+expect_eq "an unnamed re-run pointed at an account without the item fails" "$?" "1"
+expect "saying the stored token could not be read" \
+  grep -q "could not read stored token of identity '$USER_IDENT'" "$SB/setup.out"
+expect "rather than copying the item there" test ! -e "$OP_FAKE_DIR/work.1password.com/Private"
+expect_eq "and leaves the pin alone" "$(cfg identity.$USER_IDENT.opaccount)" "my.1password.com"
 
 # A second identity for an app reuses the first one's key, which is wherever
 # that identity reads from -- not in the account the new one is being pinned to.
