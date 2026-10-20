@@ -695,6 +695,19 @@ expect_eq "--default claims the default identity" "$(cfg core.defaultidentity)" 
 "$ROOT/bin/guise" default nonesuch >/dev/null 2>&1
 expect_eq "default rejects an unknown identity" "$?" "1"
 
+# The config file is plain text, so the default can still end up naming nothing;
+# with three identities there is no lone one to fall back on.
+git config -f "$HOME/.config/guise/config" core.defaultidentity nonesuch
+agent doctor > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails when the default names a missing identity" "$?" "1"
+expect "the failure names the default check" \
+  grep -q "FAIL  default identity is in config" "$SB/doctor.out"
+expect "and its hint names the identities to pick from" \
+  grep -q "hint: 'nonesuch' is no longer an identity -- pick one with 'guise default <name>' (have: claimed explicit test-agent )" "$SB/doctor.out"
+agent default claimed >/dev/null 2>&1
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes once the default is repointed" "$?" "0"
+
 # --- rename -------------------------------------------------------------------
 echo "rename:"
 "$ROOT/bin/guise" default test-agent >/dev/null 2>&1

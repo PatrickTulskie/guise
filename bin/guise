@@ -2339,6 +2339,15 @@ chk_gh_fails_closed() {
   return $rc
 }
 
+# A hand edit or an identity removed by an older version can leave the default
+# naming nothing. resolve_default covers that while there is one identity to
+# fall back on; with more, clone and use die.
+chk_default_exists() {
+  local d
+  d=$(cfg_get core.defaultidentity) || return 0
+  identity_exists "$d"
+}
+
 # A repo sitting in a workspace root but outside every identity directory gets
 # none of the wiring, so it commits as the human -- silently, which is the whole
 # problem. Usually the leftovers of a workspace that moved without its clones.
@@ -2405,6 +2414,8 @@ cmd_doctor() {
         chk_no_stranded_clones
   check "guise-gh refuses to run gh without the identity's token" \
         "the installed guise-gh falls back to YOUR gh login when the token fails -- run 'guise update' to reinstall it" chk_gh_fails_closed
+  check "default identity is in config" \
+        "'$(cfg_get core.defaultidentity || true)' is no longer an identity -- pick one with 'guise default <name>' (have: $(list_identities | tr '\n' ' '))" chk_default_exists
 
   local names name
   names=$(list_identities)
