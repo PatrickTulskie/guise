@@ -1206,9 +1206,13 @@ expect_fail "a name already in use" agent cp "$USER_IDENT" "$APP_IDENT"
 expect_fail "a name setup would refuse" agent cp "$USER_IDENT" "sc/ratch"
 mkdir -p "$HOME/special/taken"
 expect_fail "a directory that already exists" agent cp "$USER_IDENT" taken
-chmod 000 "$keys/$USER_IDENT.token"
-expect_fail "and a secret it can't read" agent cp "$USER_IDENT" scratch
-chmod 600 "$keys/$USER_IDENT.token"
+if perms_enforced; then
+  chmod 000 "$keys/$USER_IDENT.token"
+  expect_fail "and a secret it can't read" agent cp "$USER_IDENT" scratch
+  chmod 600 "$keys/$USER_IDENT.token"
+else
+  skip "and a secret it can't read (modes are not enforced here)"
+fi
 expect_eq "none of which changed the config" "$(cp_snap)" "$before"
 expect "or left a copy behind to block a retry" \
   test ! -e "$keys/scratch.token" -a ! -e "$keys/scratch.signing" -a ! -e "$HOME/special/scratch"
