@@ -209,13 +209,14 @@ op_at_least() { # <major.minor> -> op is that version or newer
 }
 
 # Which 1Password account an identity's reads go through. Inside setup, an
-# --op-account names the account the item being set up is in, which is how an
-# identity that never had one gets its reads back. Any other identity keeps
-# its own pin: a secret reused from it is wherever that identity reads from.
+# --op-account names the account of the identity setup resolves to (probe:
+# the named one, else the default), which is how an identity that never had
+# one gets its reads back. Any other identity keeps its own pin: a secret
+# reused from it is wherever that identity reads from.
 op_account_for() { # name -> account, empty for op's default
   local pinned
   pinned=$(cfg_get "identity.$1.opaccount") || pinned=""
-  if [[ "$1" == "${name:-}" ]]; then printf '%s' "${op_account:-$pinned}"
+  if [[ "$1" == "${probe:-}" ]]; then printf '%s' "${op_account:-$pinned}"
   else printf '%s' "${pinned:-${op_account:-}}"; fi
 }
 
@@ -1453,7 +1454,7 @@ wz_ask_store() { # [current]
 # stay put: those are `rename`, or a new identity.
 wz_edit_identity() { # identity
   local _was=""
-  name="$1"
+  name="$1"; probe="$1"
   kind=$(identity_kind "$1")
   require_deps "$kind"
 
@@ -1697,7 +1698,7 @@ wizard_setup() {
 
 cmd_setup() {
   local owner="" app_id="" pem="" name="" vault="$VAULT" coauthor="" base="" op_account="" store=""
-  local kind="" login="" token_file="" make_default="" sign="" op_item="" vault_given=""
+  local kind="" login="" token_file="" make_default="" sign="" op_item="" vault_given="" probe=""
   # Set by the wizard only: a token it read from its own prompt, carried in
   # this process rather than through argv or a file on the way to its store.
   local wizard="" wizard_token="" argc=$#
@@ -1757,7 +1758,7 @@ cmd_setup() {
 
   # Whose stored settings a re-run may reuse: the named identity, or the
   # default when no name was given (which is the one it would derive anyway).
-  local probe="$name"
+  probe="$name"
   [[ -n "$probe" ]] || probe=$(default_identity)
 
   # Flags for one kind mean that kind, and re-running setup for an existing
