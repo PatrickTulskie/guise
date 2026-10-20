@@ -754,6 +754,8 @@ expect "--force takes the token" test ! -e "$keys/$USER_IDENT.token"
 expect "both halves of the signing key" \
   test ! -e "$keys/$USER_IDENT.signing" -a ! -e "$keys/$USER_IDENT.signing.pub"
 expect "and the clones" test ! -e "$user_dir"
+expect_eq "so only the directory the wizard kept stays on doctor's list" \
+  "$(git config -f "$HOME/.config/guise/config" --get-all core.strandeddir)" "$HOME/special/$USER_IDENT"
 expect "and says which public key to take off the account" grep -q "ssh-ed25519 " "$SB/rm.out"
 
 # Picked from the wizard's menu this time. It is the default, and its secret is
@@ -774,6 +776,20 @@ expect "--keep leaves the token" test -f "$keys/$USER_IDENT.token"
 expect "and the directory" test -d "$user_dir"
 expect "the rest of the install stays for the next setup" \
   grep -q "guise" "$HOME/.gitconfig"
+
+# A cleanup that fails stops rm after the config section is gone, so the clones
+# it strands have to be on doctor's list by then, not only at the end.
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
+agent basedir "$HOME/solo" --name "$USER_IDENT" >/dev/null 2>&1
+user_dir="$HOME/solo/$USER_IDENT"
+git init -q "$user_dir/kept"
+chmod 500 "$keys"
+expect_fail "rm --secret fails when the token can't be shredded" agent rm "$USER_IDENT" --secret
+chmod 700 "$keys"
+expect_eq "with the config section already gone" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
+agent doctor > "$SB/rm.doctor" 2>&1
+expect "and doctor still lists the clone it left behind" grep -q "$user_dir/kept" "$SB/rm.doctor"
 
 # --- list -----------------------------------------------------------------------
 # One row per identity, carrying what you'd otherwise open the config file for:

@@ -2335,6 +2335,20 @@ stranded_clones() {
 
 chk_no_stranded_clones() { [[ -z "$STRANDED" ]]; }
 
+stranded_record() { # dir
+  git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | grep -Fxq "$1" \
+    || git config -f "$CONFIG_FILE" --add core.strandeddir "$1"
+}
+
+stranded_forget() { # dir
+  local rest d
+  rest=$(git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | grep -Fxv "$1" || true)
+  git config -f "$CONFIG_FILE" --unset-all core.strandeddir 2>/dev/null || true
+  printf '%s\n' "$rest" | while read -r d; do
+    [[ -z "$d" ]] || git config -f "$CONFIG_FILE" --add core.strandeddir "$d"
+  done
+}
+
 cmd_doctor() {
   local only="" STRANDED=""
   while [[ $# -gt 0 ]]; do
@@ -3275,6 +3289,9 @@ cmd_rm() {
   [[ "$(default_identity)" != "$name" ]] || was_default=1
 
   git config -f "$CONFIG_FILE" --remove-section "identity.$name"
+  # Recorded before any cleanup that can fail, so a shred that aborts the run
+  # does not also drop the clones out of doctor's view.
+  [[ ! -d "$dir" ]] || stranded_record "$dir"
   rm -f "$RENDER_DIR/$name.conf" "$CACHE_DIR/$name.token.json" "$(allowed_signers "$name")"
   regen_owned_gitconfig
   say "removed identity '$name' (config, git wiring, token cache)"
@@ -3301,11 +3318,8 @@ cmd_rm() {
   fi
   if [[ -n "$code" && -d "$dir" ]]; then
     rm -rf "$dir"
+    stranded_forget "$dir"
     say "deleted $dir"
-  fi
-  if [[ -d "$dir" ]] \
-     && ! git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | grep -Fxq "$dir"; then
-    git config -f "$CONFIG_FILE" --add core.strandeddir "$dir"
   fi
 
   local kept=""
