@@ -20,12 +20,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     # macOS covers bash 3.2, BSD tools, and the osxkeychain helper the rendered
     # git config has to override. Linux covers the GNU tool variants that
-    # cloud-hosted coding agents run on.
+    # cloud-hosted coding agents run on. Windows covers Git Bash (MSYS2), where
+    # git, curl and openssl are native programs that see Windows paths and no
+    # /dev/fd, and chmod does nothing.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # Every process is a fork, and a fork costs an order of magnitude more on
+    # Windows, so the same suite takes several times as long there.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 40 || 10 }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The suite's dotfiles scenarios need `ln -s` to make a symlink. MSYS
+      # copies by default; this asks for a real one, which the runner, being
+      # an administrator, is allowed to create.
+      MSYS: winsymlinks:native
     steps:
       # Pinned by commit: a tag is mutable, and this job runs test code from the
       # PR branch. Nothing here talks to a remote, so the checkout token has no
@@ -33,6 +45,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # The runner's %TEMP% is spelled with an 8.3 short name (RUNNER~1), and
+      # git expands a directory to its long name before matching includeIf, so
+      # no gitdir pattern built under a sandbox there would ever match. A real
+      # profile has a long name; give the sandboxes one.
+      - name: Put the sandboxes under a long path name
+        if: runner.os == 'Windows'
+        run: echo "TMPDIR=$(cygpath -m "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
       # The suite needs git, openssl, jq, and ssh-keygen; op, curl, and gh are
       # stubbed by the harness. Logged so a runner image that moves bash out
@@ -46,4 +66,36 @@ jobs:
           ssh -V
 
       - name: tests/run.sh
+        run: bash tests/run.sh
+
+  wsl:
+    name: wsl (ubuntu)
+    # WSL is Linux, so this mostly guards the Windows side of it: the checkout
+    # sits on the Windows disk, reached through /mnt, and the Windows tools are
+    # on PATH beside the Linux ones.
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
+        with:
+          distribution: Ubuntu-24.04
+          additional-packages: git jq openssl openssh-client
+
+      - name: Record the environment under test
+        shell: wsl-bash {0}
+        run: |
+          bash --version | head -1
+          git --version
+          openssl version
+          jq --version
+          ssh -V
+          uname -r
+          pwd
+
+      - name: tests/run.sh
+        shell: wsl-bash {0}
         run: bash tests/run.sh
