@@ -3158,8 +3158,11 @@ cmd_rename() {
 # rm -- remove one identity
 # ---------------------------------------------------------------------------
 
-identity_clones() { # name -> one clone per line
-  find "$(identity_dir "$1")" -maxdepth 2 -name .git 2>/dev/null | sed 's|/\.git$||'
+identity_clones() { # name -> one clone per line, none once the directory is gone
+  local dir
+  dir=$(identity_dir "$1")
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -maxdepth 2 -name .git 2>/dev/null | sed 's|/\.git$||'
 }
 
 # Clones holding work that exists nowhere else: uncommitted changes, or commits
