@@ -235,11 +235,11 @@ For an account identity, the usual causes:
   owner approval. Either way, a classic token with `repo` sidesteps both.
 
 To check what a credential reaches without waiting for a clone (the token goes
-through a config file on a pipe, never `-H`, so it stays out of `ps`):
+to curl as a config file on stdin, never `-H`, so it stays out of `ps`):
 
 ```bash
-curl -s --config <(printf 'header = "Authorization: Bearer %s"\n' "$(guise token <identity>)") \
-  "https://api.github.com/user/repos?per_page=1"
+printf 'header = "Authorization: Bearer %s"\n' "$(guise token <identity>)" \
+  | curl -s --config - "https://api.github.com/user/repos?per_page=1"
 ```
 
 An empty array `[]` is the failure. For an app identity, ask
