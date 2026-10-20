@@ -1411,11 +1411,7 @@ wz_ask_vault() {
     || die "the 1Password CLI (op) is not installed -- re-run and choose a file"
   while :; do
     wz_require vault "Which 1Password vault?" "$vault"
-    if [[ -n "$op_account" ]]; then
-      op --account "$op_account" vault get "$vault" >/dev/null 2>&1 && break
-    else
-      op vault get "$vault" >/dev/null 2>&1 && break
-    fi
+    op_do vault get "$vault" >/dev/null 2>&1 && break
     wz_warn "can't reach vault '$vault' -- sign in with 'op signin', or check the name"
   done
 }
@@ -1459,7 +1455,6 @@ wz_edit_identity() { # identity
   name="$1"
   kind=$(identity_kind "$1")
   require_deps "$kind"
-  op_account=$(cfg_get "identity.$1.opaccount" || true)
 
   wz_section "$1"
   if [[ "$kind" == "app" ]]; then

@@ -1828,6 +1828,18 @@ snap_cache=$(snapshot)
 printf '%s\n\n\n\n\n\n' "$USER_IDENT" | wizard >/dev/null 2>&1
 expect_eq "reviewing an op-cache identity exits 0" "$?" "0"
 expect_eq "and entering through keeps it" "$(snapshot)" "$snap_cache"
+# An --op-account alongside the review names where the item is now, over the
+# account the identity was pinned to: new token, signing, store, vault, summary.
+mkdir -p "$OP_FAKE_DIR/work.1password.com/Private"
+cp -R "$OP_FAKE_DIR/Private/$USER_IDENT" "$OP_FAKE_DIR/work.1password.com/Private/"
+printf '%s\n\n\n\n\n\n' "$USER_IDENT" \
+  | "$ROOT/bin/guise" setup --wizard --op-account work.1password.com >/dev/null 2>&1
+expect_eq "reviewing with --op-account exits 0" "$?" "0"
+expect_eq "and re-pins the identity to that account" \
+  "$(cfg identity.$USER_IDENT.opaccount)" "work.1password.com"
+op-cache clear >/dev/null
+expect_eq "which is where it reads from" \
+  "$(OP_FAKE_DEFAULT=other.1password.com "$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_wizcache"
 
 # A token already in 1Password is pointed at rather than pasted, and the
 # reference is re-asked until it reads: kind, account-exists, login, where the
