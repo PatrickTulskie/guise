@@ -151,6 +151,33 @@ The script runs under `set -euo pipefail`, which has traps worth knowing:
   non-zero, so a BSD-first fallback silently returns garbage on Linux. `file_mode`
   tries GNU `stat -c` first for that reason.
 
+## Git Bash
+
+Git for Windows is MSYS2 underneath: bash, coreutils and ssh-keygen are MSYS
+programs that see POSIX paths, while git, curl, jq and openssl (the one first
+on PATH) are native ones that see Windows paths. MSYS rewrites POSIX paths in
+a native program's argv on the way in. Nothing else is rewritten, which is
+where everything below comes from:
+
+- A path written into a file git reads has to be in Windows form: go through
+  `git_path` (a `cygpath -m` where `cygpath` exists, the path as given
+  elsewhere) at the write site, as `render_identity_conf` and `display_path`
+  do. Don't convert in the templates.
+- A path that went into guise's own config through `git config` came back
+  rewritten -- `C:/Users/...` -- so `cfg_get` turns it back into the shell's
+  spelling through `posix_path`. Read config through `cfg_get`/`cfg_get_all`,
+  not `git config` directly, or string comparisons against `$HOME` fail.
+- A native program cannot open `/dev/fd/N`, so a process substitution handed
+  to curl or jq fails there. curl takes its config on stdin. openssl has no
+  stdin option for a key, so `openssl_for_fd` picks the MSYS build Git for
+  Windows ships at `/usr/bin/openssl` -- the key stays off disk and off argv
+  either way.
+- `chmod` is a no-op (the disk is mounted `noacl`) and every file reads 644.
+  `mode_600` is satisfied there, and doctor says so in the check's own words.
+- There is no `script`, so the suite's pty scenarios print `skip` on Windows.
+  `modes_apply`, `expect_mode`, `git_path` and `cfg` in the harness are the
+  same accommodations on the asserting side.
+
 ## Secrets
 
 The whole point of this tool is credential separation, so:

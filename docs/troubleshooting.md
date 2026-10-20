@@ -502,6 +502,62 @@ block. If your own commits changed behavior:
 - `guise doctor` runs a "human identity untouched" check.
 - Worst case `guise uninstall` removes every trace of the wiring.
 
+## Under WSL, commits land as you although `doctor` passes
+
+**Cause:** the `git` making the commit is the Windows one. An editor on the
+Windows side that opens a `\\wsl$\...` folder, or a `git.exe` reached through
+`/mnt/c`, reads `%USERPROFILE%\.gitconfig` — where guise was never set up —
+not the distro's `~/.gitconfig` that `doctor` checked.
+
+Run the editor in its WSL mode (VS Code "Remote - WSL", for instance) so `git`
+runs inside the distro, or run `guise setup` from Git Bash too: the two
+installs are independent, and each covers the `git` that reads its config.
+`git --version` says which one you have — `.windows.` in the version string is
+the Windows build.
+
+## WSL: "missing dependency: op" with 1Password's integration set up
+
+**Cause:** the integration's documented `alias op=op.exe` only exists in your
+interactive shell. guise's helpers run `op` from scripts, which don't read
+aliases.
+
+Put a wrapper on `PATH` instead:
+
+```bash
+printf '#!/bin/sh\nexec op.exe "$@"\n' > ~/.local/bin/op && chmod +x ~/.local/bin/op
+```
+
+## Git Bash: "no openssl here can read a key handed over on a pipe"
+
+**Cause:** an App identity's key reaches `openssl` on a pipe, never as a file
+or an argument, and the native `openssl` first on PATH in Git Bash can't open
+a pipe. guise falls back to the MSYS build Git for Windows ships at
+`/usr/bin/openssl`, and this means it didn't find it — a trimmed `PATH`, or a
+`bash` that isn't Git for Windows's own.
+
+Run from Git Bash itself, or put `C:\Program Files\Git\usr\bin` on `PATH`.
+Under WSL every `openssl` reads pipes, so that works too.
+
+## WSL: `bin/guise: line 5: $'\r': command not found`
+
+**Cause:** the clone was made by Windows `git` with `core.autocrlf` on, which
+turned the scripts' line endings into CRLF, and a Linux bash then reads the
+`\r` as part of each line. The repo pins LF through `.gitattributes`, so a
+clone made from a version that has it is immune.
+
+Re-clone, or from inside the clone:
+
+```bash
+git -c core.autocrlf=false checkout -- .
+```
+
+## Git Bash: `doctor` says "NTFS has no modes" instead of checking for 600
+
+Not a failure. Git for Windows mounts the disk `noacl`, so `chmod` is a no-op
+and every file reads as 644 whatever was asked. The secret under
+`~/.config/guise/keys/` is protected by the ACL on your profile directory,
+which is what the message is telling you.
+
 ## CI didn't run on the agent's PR
 
 It should — an App's installation token *does* trigger workflows (unlike

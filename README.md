@@ -77,8 +77,8 @@ by default — the better fit for open source — or a
 **[GitHub App bot](#a-github-app-bot-instead)**. Both kinds can coexist, one per
 subdirectory.
 
-The tool is tested on macOS and Linux, and stays compatible with the bash 3.2
-that ships with macOS.
+The tool is tested on macOS, Linux, and Windows (Git Bash and WSL), and stays
+compatible with the bash 3.2 that ships with macOS.
 
 ## Setting up a separate GitHub account
 
@@ -607,6 +607,41 @@ Inside, `$HOME` is disposable, GitHub and 1Password are fakes, and `guise` is
 the copy in your working tree — so the guided setup, `doctor`, `rename` and
 even `uninstall` all run end to end with nothing real at stake. The container
 tells you the account and App ID to answer with when it starts.
+
+## Windows
+
+guise runs in Git Bash — the shell Git for Windows installs — and in WSL. Set
+it up from the shell whose `git` makes the commits; that is the one rule, and
+the two don't share a config, so a machine that uses both gets set up in both.
+
+**Git Bash.** Everything hangs off includes in `~/.gitconfig`, which is
+`%USERPROFILE%\.gitconfig` here, so the Windows `git` your editor runs reads
+it too. Paths in the rendered config are written in Windows form, since git,
+ssh-keygen and curl are native programs that can't follow `/c/Users/...`.
+Two things differ from macOS and Linux:
+
+- `chmod` does nothing on NTFS, so `doctor` doesn't check for mode 600 there
+  and says so. What keeps `~/.config/guise/keys/` private is the ACL on your
+  profile directory, which only you (and administrators) can read.
+- An App identity signs its JWT with the `openssl` Git for Windows ships at
+  `/usr/bin/openssl`. The native one ahead of it on PATH can't read a key
+  handed over on a pipe, and a pipe is the only way the key travels — never a
+  temp file, never an argument. Keep Git for Windows's own `usr/bin` on PATH.
+
+**WSL.** It's Linux, so install `git`, `gh` and — if you use it — `op` inside
+the distro and run `setup` there. The trap is which `git` is running. An
+editor on the Windows side that opens a `\\wsl$\...` folder runs Windows
+`git`, which reads the Windows `.gitconfig`, not the distro's, so the identity
+never applies and commits land as you. Run the editor in its WSL mode (VS Code
+"Remote - WSL" and the like) so `git` runs inside the distro, or run `setup`
+in Git Bash as well. The same goes for `git.exe`, `gh.exe` and `op.exe`
+reached through `/mnt/c`: they are Windows programs with Windows config.
+1Password's WSL integration suggests `alias op=op.exe`; an alias is invisible
+to guise's helpers, so give them a wrapper instead:
+
+```bash
+printf '#!/bin/sh\nexec op.exe "$@"\n' > ~/.local/bin/op && chmod +x ~/.local/bin/op
+```
 
 ## When something's off
 
