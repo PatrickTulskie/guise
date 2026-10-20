@@ -67,7 +67,9 @@ yourself.
 ## Tests
 
 ```bash
-bash tests/run.sh                 # ~2min, no network
+bash tests/run.sh                 # under a minute, no network
+bash tests/run.sh rm cp           # just those cases
+JOBS=1 bash tests/run.sh          # one case at a time
 docker compose run --rm tests     # the same suite, on Linux
 ```
 
@@ -77,9 +79,16 @@ described below, Linux is the GNU tooling cloud-hosted agents run on, and WSL
 is Linux with the checkout on the Windows disk. Git Bash, the MSYS environment
 described further down, takes 25 minutes a run, so it is a weekly workflow
 and a button (Actions → Windows → Run workflow): press it before merging a
-change to path handling, the credential plumbing, or the harness. The harness gives each scenario a fresh
-sandbox: `$HOME` under `mktemp -d`, `$PATH` prefixed with `tests/stubs`, and
-real git/openssl/jq.
+change to path handling, the credential plumbing, or the harness.
+
+Every file under `tests/cases/` is one scenario, and `run.sh` runs as many of
+them at once as there are cores. Each starts with `new_sandbox` from
+`tests/lib.sh`: `$HOME` under `mktemp -d`, `$PATH` prefixed with `tests/stubs`,
+and real git/openssl/jq. Cases share nothing but the stubs, so a new one gets
+its own file and its own sandbox, and never leans on what another case set up.
+Within a case, run `setup` or `doctor` once into a file and assert on that
+several times, rather than once per assertion -- every run is a few thousand
+forks. The pty helpers (`in_pty`, `have_pty`) live in `lib.sh` too.
 
 The stubs stand in for the outside world, all driven by environment variables
 rather than recorded fixtures:
@@ -237,7 +246,9 @@ no time — and name the model and harness at the end.
 
 ```text
 bin/guise                the entire tool: subcommands, checks, embedded helpers
-tests/run.sh             the whole suite, in a sandboxed $HOME
+tests/run.sh             runs the cases in parallel and sums them up
+tests/lib.sh             the sandbox, the assertions, and the pty helpers
+tests/cases/             one scenario per file, each in a sandboxed $HOME
 tests/stubs/{op,curl,gh} the outside world
 docs/troubleshooting.md  keyed to real failure modes
 compose.yaml, docker/    a disposable machine to run the tool against by hand
