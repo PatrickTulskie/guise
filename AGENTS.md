@@ -72,10 +72,12 @@ docker compose run --rm tests     # the same suite, on Linux
 ```
 
 Green is the merge gate; CI runs exactly this on every PR, on macOS, on
-Linux, on Windows in Git Bash, and on Windows inside WSL: macOS is the bash
-3.2 and BSD floor described below, Linux is the GNU tooling cloud-hosted
-agents run on, Git Bash is the MSYS environment described further down, and
-WSL is Linux with the checkout on the Windows disk. The harness gives each scenario a fresh
+Linux, and on Windows inside WSL: macOS is the bash 3.2 and BSD floor
+described below, Linux is the GNU tooling cloud-hosted agents run on, and WSL
+is Linux with the checkout on the Windows disk. Git Bash, the MSYS environment
+described further down, takes 25 minutes a run, so it is a weekly workflow
+and a button (Actions → Windows → Run workflow): press it before merging a
+change to path handling, the credential plumbing, or the harness. The harness gives each scenario a fresh
 sandbox: `$HOME` under `mktemp -d`, `$PATH` prefixed with `tests/stubs`, and
 real git/openssl/jq.
 
@@ -239,5 +241,5 @@ tests/run.sh             the whole suite, in a sandboxed $HOME
 tests/stubs/{op,curl,gh} the outside world
 docs/troubleshooting.md  keyed to real failure modes
 compose.yaml, docker/    a disposable machine to run the tool against by hand
-.github/workflows/       CI: the suite, on macOS, Linux, Git Bash and WSL, on every PR
+.github/workflows/       CI: the suite, on macOS, Linux and WSL on every PR; Git Bash weekly
 ```

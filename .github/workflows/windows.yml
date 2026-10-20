@@ -1,0 +1,55 @@
+name: Windows
+
+# Git Bash runs the suite in about 25 minutes -- every process is a fork, and a
+# fork costs an order of magnitude more on Windows -- so it is a weekly canary
+# and a button, not a gate on every PR. Run it by hand before merging a change
+# to path handling, the credential plumbing, or the harness itself.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  git-bash:
+    name: windows-latest (Git Bash)
+    # Git Bash is MSYS2: git, curl and openssl are native programs that see
+    # Windows paths and no /dev/fd, and chmod does nothing.
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The suite's dotfiles scenarios need `ln -s` to make a symlink. MSYS
+      # copies by default; this asks for a real one, which the runner, being
+      # an administrator, is allowed to create.
+      MSYS: winsymlinks:native
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The runner's %TEMP% is spelled with an 8.3 short name (RUNNER~1), and
+      # git expands a directory to its long name before matching includeIf, so
+      # no gitdir pattern built under a sandbox there would ever match. A real
+      # profile has a long name; give the sandboxes one.
+      - name: Put the sandboxes under a long path name
+        run: echo "TMPDIR=$(cygpath -m "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+
+      - name: Record the environment under test
+        run: |
+          bash --version | head -1
+          git --version
+          openssl version
+          jq --version
+          ssh -V
+
+      - name: tests/run.sh
+        run: bash tests/run.sh
