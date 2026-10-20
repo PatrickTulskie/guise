@@ -1788,9 +1788,10 @@ cmd_setup() {
     coauthor=$(cfg_get core.coauthor) || true
   fi
 
-  # Filled in by whichever discovery branch runs below.
-  # secret_item is the 1Password item the secret was read from, if any.
-  local secret_material="" secret_source="" secret_path="" op_title="" secret_item=""
+  # Filled in by whichever discovery branch runs below. secret_item is the
+  # 1Password item the secret was read from, if any, and secret_account the
+  # account it was read through.
+  local secret_material="" secret_source="" secret_path="" op_title="" secret_item="" secret_account=""
   local slug="" install_id="" bot_user_id="" user_id="" expires=""
 
   if [[ "$kind" == "user" ]]; then
@@ -1807,7 +1808,7 @@ cmd_setup() {
     elif [[ -n "$op_item" ]]; then
       secret_material=$(op_do read "$op_item/token") \
         || die "could not read a token field from $op_item -- op signin, or check the item"
-      secret_item="$op_item"
+      secret_item="$op_item"; secret_account=$(op_account_for "$name")
     else
       if [[ "$(identity_kind "$probe")" == "user" ]] \
          && cfg_get "identity.$probe.login" >/dev/null; then
@@ -1819,6 +1820,7 @@ cmd_setup() {
         secret_material=$(read_identity_secret "$token_owner") \
           || die "could not read stored token of identity '$token_owner' -- pass --token-file to store a fresh one"
         secret_item=$(cfg_get "identity.$token_owner.opitem" || true)
+        secret_account=$(op_account_for "$token_owner")
       else
         ask_secret secret_material "Personal access token for the agent account"
       fi
@@ -1881,7 +1883,7 @@ cmd_setup() {
     elif [[ -n "$op_item" ]]; then
       secret_material=$(op_do read "$op_item/private_key") \
         || die "could not read a private_key field from $op_item -- op signin, or check the item"
-      secret_item="$op_item"
+      secret_item="$op_item"; secret_account=$(op_account_for "$name")
     else
       if [[ -n "$name" ]] && [[ "$(cfg_get "identity.$name.appid")" == "$app_id" ]]; then
         key_owner="$name"
@@ -1893,6 +1895,7 @@ cmd_setup() {
       secret_material=$(read_identity_secret "$key_owner") \
         || die "could not read stored key of identity '$key_owner' -- pass --pem to store a fresh one"
       secret_item=$(cfg_get "identity.$key_owner.opitem" || true)
+      secret_account=$(op_account_for "$key_owner")
     fi
 
     # --- discover slug, installation id, bot user id -----------------------
@@ -2026,7 +2029,8 @@ cmd_setup() {
       printf '%s' "$template" | op_do item edit "$op_title" --vault "$vault" >/dev/null \
         || die "1Password refused the $1 field on $op_item"
     }
-    if [[ "$op_item" == "$secret_item" ]]; then
+    # The same path in another account is a different item, or none at all.
+    if [[ "$op_item" == "$secret_item" && "$op_account" == "${secret_account:-$(op_default_account)}" ]]; then
       say "==> using the credentials already in 1Password ($op_item)"
     else
       say "==> storing credentials in 1Password ($op_item)"

@@ -498,6 +498,19 @@ OP_FAKE_DEFAULT=other.1password.com agent doctor --name second >/dev/null 2>&1
 expect_eq "and the new identity reads through its pin" "$?" "0"
 unset OP_ARGV_LOG
 
+# The same item path in another account is not the item the key came from.
+new_sandbox
+run_setup --store op --pem "$SB/key.pem" >/dev/null 2>&1
+mkdir -p "$OP_FAKE_DIR/work.1password.com"
+agent setup --name second --owner patricktulskie --app-id 1111 --store op \
+  --op-account work.1password.com >/dev/null 2>&1
+expect_eq "a second identity in another account, same vault, exits 0" "$?" "0"
+expect "writes the key to that path in its own account rather than calling it stored" \
+  cmp -s "$OP_FAKE_DIR/work.1password.com/Private/$APP_IDENT/private_key" "$OP_FAKE_DIR/Private/$APP_IDENT/private_key"
+expect_eq "and is pinned there" "$(cfg identity.second.opaccount)" "work.1password.com"
+OP_FAKE_DEFAULT=other.1password.com agent doctor --name second >/dev/null 2>&1
+expect_eq "so it reads" "$?" "0"
+
 # --- user identity guardrails ------------------------------------------------
 echo "user identity guardrails:"
 printf 'github_pat_other\n' > "$SB/pat2.txt"
