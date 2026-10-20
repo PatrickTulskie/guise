@@ -26,7 +26,8 @@ jobs:
     # cloud-hosted coding agents run on. Git Bash takes 25 minutes a run, so it
     # lives in windows.yml on a schedule instead of here.
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # The macOS runner has finished the suite within seconds of ten minutes.
+    timeout-minutes: 20
     steps:
       # Pinned by commit: a tag is mutable, and this job runs test code from the
       # PR branch. Nothing here talks to a remote, so the checkout token has no
