@@ -348,6 +348,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 |---|---|
 | `guise setup` | provision an identity (idempotent); asks for the answers when given no flags on a terminal |
 | `guise doctor` | verify everything; non-zero exit on any failure |
+| `guise triage` | start a session in your coding harness to work out what's wrong |
 | `guise clone <owner/repo>` | clone where the identity applies |
 | `guise use [name]` | cd to an identity's directory; the default one if you don't say |
 | `guise update` | reinstall helpers, hook, and rendered confs from this copy of the script |
@@ -545,6 +546,14 @@ tells you the account and App ID to answer with when it starts.
 
 Run `guise doctor` first — every check prints a remediation hint. Then see
 [docs/troubleshooting.md](docs/troubleshooting.md).
+
+Still stuck? `guise triage` opens a session in Claude Code, Codex, Cursor
+Agent, OpenCode, or Pi — whichever you pick of the ones installed — briefed to
+read guise's source, run `doctor`, and look around your machine. It starts by
+asking what went wrong, so paste in the error or a screenshot. If it finds a
+bug in guise itself, it offers to open a PR with the fix from your agent's
+GitHub account (an App bot can't, so it hands you the diff instead). `guise triage --print` gives you the prompt to paste into anything
+else.
 
 ## License
 
