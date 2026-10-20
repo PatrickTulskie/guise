@@ -360,6 +360,20 @@ FAKE_SSO=required agent doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
 expect "an SSO 403 fails the same check" \
   grep -q "FAIL  token authorized for every SAML SSO org" "$SB/doctor.out"
 
+# Only minted App tokens are cached, so a cache file under a PAT identity's
+# name is a copy of the standing credential that something else wrote.
+mkdir -p "$XDG_CACHE_HOME/guise"
+printf '{"token":"github_pat_stub123"}\n' > "$XDG_CACHE_HOME/guise/$USER_IDENT.token.json"
+agent doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails on a token cache for an account identity" "$?" "1"
+expect "the failure names the cache check" \
+  grep -q "FAIL  no token cache on disk for an account" "$SB/doctor.out"
+expect "and its hint names the file and calls the token exposed" \
+  grep -q "hint: delete $XDG_CACHE_HOME/guise/$USER_IDENT.token.json -- .*treat it as exposed" "$SB/doctor.out"
+rm "$XDG_CACHE_HOME/guise/$USER_IDENT.token.json"
+agent doctor --name "$USER_IDENT" >/dev/null 2>&1
+expect_eq "doctor passes once the cache file is gone" "$?" "0"
+
 "$ROOT/bin/guise" setup --kind user </dev/null >/dev/null 2>&1
 expect_eq "re-run without --token-file reuses the stored token" "$?" "0"
 

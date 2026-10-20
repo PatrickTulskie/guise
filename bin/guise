@@ -2177,6 +2177,13 @@ chk_cache() {
   a=$("$BIN_DIR/guise-token" "$1"); b=$("$BIN_DIR/guise-token" "$1")
   [[ "$a" == "$b" && -f "$CACHE_DIR/$1.token.json" ]]
 }
+# The inverse for an account: guise-token caches only minted App tokens, so a
+# cache file under a PAT identity's name is a second copy of a standing
+# credential that nothing in guise wrote.
+chk_no_pat_cache() {
+  "$BIN_DIR/guise-token" "$1" >/dev/null || return 1
+  [[ ! -e "$CACHE_DIR/$1.token.json" ]]
+}
 chk_email_format() {
   local re='^[0-9]+\+.*\[bot\]@users\.noreply\.github\.com$'
   [[ "$(identity_kind "$1")" != "user" ]] || re='^[0-9]+\+[^@]+@users\.noreply\.github\.com$'
@@ -2436,6 +2443,8 @@ cmd_doctor() {
             "re-run setup; email must be <userId>+<login>@users.noreply.github.com" chk_email_format "$name"
       check "token authorized for every SAML SSO org" \
             "as the agent account, open the token at github.com/settings/tokens and authorize it under 'Configure SSO'; a fine-grained token needs the org to approve it (docs/troubleshooting.md)" chk_sso_authorized "$name"
+      check "no token cache on disk for an account" \
+            "delete $CACHE_DIR/$name.token.json -- guise never writes it for a PAT, so whatever did has read the token: treat it as exposed and issue a new one" chk_no_pat_cache "$name"
     else
       say "identity '$name' ($(cfg_get "identity.$name.slug") on $(cfg_get "identity.$name.owner")):"
       if [[ "$(key_source "$name")" == "file" ]]; then
