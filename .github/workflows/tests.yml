@@ -20,24 +20,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, ubuntu-latest]
     # macOS covers bash 3.2, BSD tools, and the osxkeychain helper the rendered
     # git config has to override. Linux covers the GNU tool variants that
-    # cloud-hosted coding agents run on. Windows covers Git Bash (MSYS2), where
-    # git, curl and openssl are native programs that see Windows paths and no
-    # /dev/fd, and chmod does nothing.
+    # cloud-hosted coding agents run on. Git Bash takes 25 minutes a run, so it
+    # lives in windows.yml on a schedule instead of here.
     runs-on: ${{ matrix.os }}
-    # Every process is a fork, and a fork costs an order of magnitude more on
-    # Windows, so the same suite takes several times as long there.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 40 || 10 }}
-    defaults:
-      run:
-        shell: bash
-    env:
-      # The suite's dotfiles scenarios need `ln -s` to make a symlink. MSYS
-      # copies by default; this asks for a real one, which the runner, being
-      # an administrator, is allowed to create.
-      MSYS: winsymlinks:native
+    timeout-minutes: 10
     steps:
       # Pinned by commit: a tag is mutable, and this job runs test code from the
       # PR branch. Nothing here talks to a remote, so the checkout token has no
@@ -45,14 +34,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      # The runner's %TEMP% is spelled with an 8.3 short name (RUNNER~1), and
-      # git expands a directory to its long name before matching includeIf, so
-      # no gitdir pattern built under a sandbox there would ever match. A real
-      # profile has a long name; give the sandboxes one.
-      - name: Put the sandboxes under a long path name
-        if: runner.os == 'Windows'
-        run: echo "TMPDIR=$(cygpath -m "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
       # The suite needs git, openssl, jq, and ssh-keygen; op, curl, and gh are
       # stubbed by the harness. Logged so a runner image that moves bash out
