@@ -1223,11 +1223,11 @@ expect_eq "the copy is the same account" "$(cfg identity.scratch.login)" "$FAKE_
 expect_eq "in the source's own workspace" "$(cfg identity.scratch.basedir)" "$HOME/special"
 expect "so its directory sits beside the source" test -d "$HOME/special/scratch"
 expect_eq "the token file is a copy of its own" "$(cfg identity.scratch.tokenfile)" "$keys/scratch.token"
-expect_eq "at mode 600" "$(file_mode "$keys/scratch.token")" "600"
+expect_mode "at mode 600" "$keys/scratch.token" "600"
 expect "holding the same token" cmp -s "$keys/scratch.token" "$keys/$USER_IDENT.token"
 expect "the signing key is copied, not generated" \
   cmp -s "$keys/scratch.signing.pub" "$keys/$USER_IDENT.signing.pub"
-expect_eq "its private half at mode 600" "$(file_mode "$keys/scratch.signing")" "600"
+expect_mode "its private half at mode 600" "$keys/scratch.signing" "600"
 expect_eq "and the config points at the copy" "$(cfg identity.scratch.signingkey)" "$keys/scratch.signing"
 expect_eq "the default does not move" "$(cfg core.defaultidentity)" "$APP_IDENT"
 expect "cp says how to clone into the copy" \
