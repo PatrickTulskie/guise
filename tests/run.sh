@@ -798,6 +798,18 @@ expect_eq "with the config section already gone" "$(cfg "identity.$USER_IDENT.lo
 agent doctor > "$SB/rm.doctor" 2>&1
 expect "and doctor still lists the clone it left behind" grep -q "$user_dir/kept" "$SB/rm.doctor"
 
+# A workspace deleted by hand before rm is nothing to scan, not a reason to stop.
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
+rm -rf "$HOME/agentic-code/$USER_IDENT"
+stranded_before=$(git config -f "$HOME/.config/guise/config" --get-all core.strandeddir)
+agent rm "$USER_IDENT" --force > "$SB/rm.gone" 2>&1
+expect_eq "rm --force removes an identity whose directory is already gone" "$?" "0"
+expect_eq "config section and all" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
+expect "taking the token with it" test ! -e "$keys/$USER_IDENT.token"
+expect_eq "without adding the missing directory to doctor's list" \
+  "$(git config -f "$HOME/.config/guise/config" --get-all core.strandeddir)" "$stranded_before"
+
 # --- list -----------------------------------------------------------------------
 # One row per identity, carrying what you'd otherwise open the config file for:
 # which account it commits as, where its secret lives, where its clones go.
