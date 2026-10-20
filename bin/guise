@@ -752,6 +752,10 @@ inner=$(git config --type=path --get guise.innerhookspath 2>/dev/null || true)
 if [[ -z "$inner" ]] && common=$(git rev-parse --git-common-dir 2>/dev/null); then
   inner="$common/hooks"
 fi
+# Git for Windows answers with C:/ paths, which this shell can only follow as /c/.
+case "$inner" in
+  [A-Za-z]:[/\\]*) ! command -v cygpath >/dev/null || inner=$(cygpath -u "$inner") ;;
+esac
 case "$inner" in
   ""|/*) ;;
   *)     inner="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/$inner" ;;

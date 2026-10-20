@@ -370,7 +370,7 @@ dispatch="$HOME/.config/guise/git/hooks"
 repo="$HOME/agentic-code/$APP_IDENT/plain"
 git init -q "$repo"
 expect_eq "agent scope points git at the dispatcher" \
-  "$(git -C "$repo" config --get core.hooksPath)" "$dispatch"
+  "$(git -C "$repo" config --get core.hooksPath)" "$(git_path "$dispatch")"
 expect "which has an entry for every hook git looks up by name" \
   test -x "$dispatch/pre-commit" -a -x "$dispatch/pre-push" -a -x "$dispatch/reference-transaction"
 
@@ -431,7 +431,7 @@ expect_eq "setup-hooks exits 0" "$?" "0"
 expect_eq "it records the path the repo pinned" \
   "$(git -C "$pinned" config --local --get guise.innerhookspath)" ".githooks"
 expect_eq "and points the repo at the dispatcher" \
-  "$(git -C "$pinned" config --local --get core.hooksPath)" "$dispatch"
+  "$(git -C "$pinned" config --local --get core.hooksPath)" "$(git_path "$dispatch")"
 expect_eq "and touches nothing in the working tree" \
   "$(git -C "$pinned" status --porcelain)" "$tree_before"
 ( cd "$pinned" && echo x > f && git add f && git commit -q -m "typed message" ) >/dev/null 2>&1
@@ -466,7 +466,7 @@ git config --global init.templateDir "$SB/tmpl"
 git config --global --unset init.templateDir
 managed="$HOME/agentic-code/$APP_IDENT/managed"
 expect_eq "clone sets a fresh clone up on the spot" \
-  "$(git -C "$managed" config --local --get core.hooksPath)" "$dispatch"
+  "$(git -C "$managed" config --local --get core.hooksPath)" "$(git_path "$dispatch")"
 expect_eq "recording the path it arrived with" \
   "$(git -C "$managed" config --local --get guise.innerhookspath)" ".githooks"
 
@@ -492,7 +492,7 @@ expect_eq "rm hands a clone it keeps its own hooks path back" \
   "$(git -C "$theirs" config --local --get core.hooksPath)" ".githooks"
 expect_fail "and drops the record" git -C "$theirs" config --local --get guise.innerhookspath
 expect_eq "leaving other identities' clones alone" \
-  "$(git -C "$pinned" config --local --get core.hooksPath)" "$dispatch"
+  "$(git -C "$pinned" config --local --get core.hooksPath)" "$(git_path "$dispatch")"
 agent uninstall --yes >/dev/null 2>&1
 expect_eq "uninstall restores the recorded path byte for byte" \
   "$(git -C "$pinned" config --local --get core.hooksPath)" ".husky/_"
