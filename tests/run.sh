@@ -1807,8 +1807,10 @@ expect_eq "opencode gets it through --prompt" \
   "$(cat "$SB/harness/opencode.argc") $(cat "$SB/harness/opencode.arg1")" "2 --prompt"
 expect_eq "intact too" "$(cat "$SB/harness/opencode.arg2")" "$prompt"
 
-expect_fail "an unsupported harness is refused" agent triage --harness vim
-expect_fail "so is one that isn't installed" env PATH="/usr/bin:/bin" "$ROOT/bin/guise" triage --harness pi
+expect "an unsupported harness is refused" \
+  grep -qF "unknown harness 'no-such-harness'" <<<"$(agent triage --harness no-such-harness 2>&1)"
+expect "so is one that isn't installed" \
+  grep -qF "pi is not on your PATH" <<<"$(PATH="/usr/bin:/bin" agent triage --harness pi 2>&1)"
 
 # On a terminal it asks which harness; enter takes the first one found.
 rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
