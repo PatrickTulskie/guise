@@ -5,7 +5,8 @@
 # GitHub account holding a PAT.
 #
 # Subcommands: setup | doctor | triage | uninstall | clone | use | token
-#              update | default | rename | basedir | which | list | warm-cache
+#              update | default | rename | cp | rm | basedir | which | list
+#              warm-cache
 #
 # Self-contained: the helper binaries, git config template, and commit hook
 # are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
@@ -3332,6 +3333,102 @@ cmd_rename() {
 }
 
 # ---------------------------------------------------------------------------
+# cp -- a second workspace for the same identity
+# ---------------------------------------------------------------------------
+
+# The new file is never readable by anyone else, not even between cp and chmod.
+copy_key_file() { # src dst
+  (umask 077 && cp "$1" "$2")
+  chmod 600 "$2"
+}
+
+# A second set of clones committing as the same account, without a second
+# setup: that would read the secret again and, for a signing identity, put a
+# new key through the browser step. Everything named after the identity is
+# copied so rename, rm --secret and uninstall keep their one assumption -- an
+# identity owns the files that carry its name. A 1Password item is shared
+# instead: same reference, one place to rotate.
+cmd_cp() {
+  local src="" new=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -*) die "cp: unknown flag '$1'" ;;
+      *)
+        if   [[ -z "$src" ]]; then src="$1"
+        elif [[ -z "$new" ]]; then new="$1"
+        else die "cp: too many arguments"; fi
+        shift ;;
+    esac
+  done
+  [[ -n "$src" && -n "$new" ]] || die "usage: guise cp <identity> <new-name>"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+
+  local name_re='^[A-Za-z0-9_-]+$'
+  [[ "$new" =~ $name_re ]] || die "identity name must match [A-Za-z0-9_-]+: '$new'"
+  identity_exists "$src" || die "identity '$src' not in config"
+  identity_exists "$new" && die "identity '$new' already exists"
+
+  # The workspace override is copied with the rest of the section, so the copy
+  # lands beside the source.
+  local dst; dst="$(basedir "$src")/$new"
+  [[ ! -e "$dst" ]] || die "$dst already exists -- move it aside first"
+
+  # Every source file is checked before anything is written, and the config
+  # section is written last: it is what makes the name taken, so a failure
+  # before it leaves nothing in the way of a retry.
+  local secret="" signkey=""
+  if [[ "$(key_source "$src")" == "file" ]]; then
+    secret=$(secret_file "$src") || die "identity '$src' has no secret file recorded -- re-run 'guise setup --name $src'"
+    [[ -r "$secret" ]] || die "cannot read $secret -- nothing copied"
+  fi
+  if signing_enabled "$src"; then
+    signkey=$(signing_key "$src")
+    [[ -r "$signkey" && -r "$signkey.pub" ]] \
+      || die "identity '$src' signs commits but its key is gone from $signkey -- re-run 'guise setup --sign'"
+  fi
+
+  local new_secret="" new_signkey=""
+  if [[ -n "$secret$signkey" ]]; then mkdir -p "$KEYS_DIR"; chmod 700 "$KEYS_DIR"; fi
+  if [[ -n "$secret" ]]; then
+    new_secret="$KEYS_DIR/$new.${secret##*.}"
+    copy_key_file "$secret" "$new_secret"
+  fi
+  if [[ -n "$signkey" ]]; then
+    new_signkey="$KEYS_DIR/$new.signing"
+    copy_key_file "$signkey" "$new_signkey"
+    cp "$signkey.pub" "$new_signkey.pub"
+  fi
+
+  # git config renames a section but can't copy one.
+  local key
+  for key in $(git config -f "$CONFIG_FILE" --name-only --get-regexp "^identity\.$src\."); do
+    cfg_set "identity.$new.${key#identity.$src.}" "$(cfg_get "$key")"
+  done
+  if [[ -n "$new_secret" ]]; then
+    if [[ "$(identity_kind "$new")" == "user" ]]; then
+      cfg_set "identity.$new.tokenfile" "$new_secret"
+    else
+      cfg_set "identity.$new.keyfile" "$new_secret"
+    fi
+  fi
+  [[ -z "$new_signkey" ]] || cfg_set "identity.$new.signingkey" "$new_signkey"
+
+  mkdir -p "$dst"
+  render_identity_conf "$new"
+  regen_owned_gitconfig
+  ensure_include_block
+
+  say "copied identity '$src' to '$new' -- both commit as $(identity_account "$src")"
+  if [[ -n "$new_secret" ]]; then
+    say "    its $(secret_field "$new" | tr _ ' ') is a copy at $new_secret; 'guise rm $new --secret' shreds only that one"
+  else
+    say "    both read the same 1Password item ($(cfg_get "identity.$new.opitem")) -- rotate it once"
+  fi
+  [[ -z "$new_signkey" ]] || say "    commits sign with the same key, copied to $new_signkey -- already on the account"
+  say "    agent clones go in $dst/ (use 'guise clone <owner/repo> --name $new')"
+}
+
+# ---------------------------------------------------------------------------
 # rm -- remove one identity
 # ---------------------------------------------------------------------------
 
@@ -3595,6 +3692,9 @@ usage: guise <command> [flags]
   default    show the identity used when none is named, or set it  [<name>]
   rename     rename an identity, its directory, and its key files
              <old> <new>
+  cp         a second workspace committing as the same account, without a
+             second setup: the secret file and signing key are copied, a
+             1Password item is shared  <identity> <new-name>
   rm         remove one identity; a bare "guise rm" on a terminal asks what
              should go with it, and without a terminal it needs a flag
              [<identity>] [--keep | --code --secret --signing-key | --force]
@@ -3624,6 +3724,7 @@ case "${1:-}" in
   token)      shift; cmd_token "$@" ;;
   default)    shift; cmd_default "$@" ;;
   rename)     shift; cmd_rename "$@" ;;
+  cp)         shift; cmd_cp "$@" ;;
   rm)         shift; cmd_rm "$@" ;;
   basedir)    shift; cmd_basedir "$@" ;;
   which)      shift; cmd_which "$@" ;;
