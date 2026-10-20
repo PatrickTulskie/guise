@@ -2,6 +2,8 @@
 
 Run `guise doctor` first — it covers most of these and prints a hint per
 failing check. This page is keyed to the failure modes people actually hit.
+When neither explains it, `guise triage` hands the problem to a coding agent
+along with the source, `doctor`, and your machine to dig through.
 
 ## Commits or pushes land as *you*, not the bot
 

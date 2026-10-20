@@ -53,6 +53,8 @@ and offering them that instead is a fine answer when the flags aren't settled.
 `use` is harmless but a bare `guise use` is not for you: with no shell hook
 loaded it replaces itself with an interactive shell, so the tool call never
 returns. `guise use <name> --emit-shell` only prints the `cd` and is safe.
+`guise triage --harness <name>` likewise execs an interactive harness; without
+a terminal a bare `triage` only prints its prompt, which is safe.
 
 `uninstall`, `rename` and `rm` stay off the table unless the human asks for that
 exact operation and you have read back what it does first. None of them will

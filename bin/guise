@@ -4,8 +4,8 @@
 # An identity is either a GitHub App installation (a bot) or a separate
 # GitHub account holding a PAT.
 #
-# Subcommands: setup | doctor | uninstall | clone | use | token | update
-#              default | rename | basedir | which | list | warm-cache
+# Subcommands: setup | doctor | triage | uninstall | clone | use | token
+#              update | default | rename | basedir | which | list | warm-cache
 #
 # Self-contained: the helper binaries, git config template, and commit hook
 # are embedded below and written out by `setup`. Targets bash 3.2 (macOS).
@@ -2451,6 +2451,158 @@ cmd_doctor() {
 }
 
 # ---------------------------------------------------------------------------
+# triage
+# ---------------------------------------------------------------------------
+
+UPSTREAM="PatrickTulskie/guise"
+HARNESSES="claude codex cursor-agent opencode pi"
+
+harness_label() {
+  case "$1" in
+    claude)       printf 'Claude Code' ;;
+    codex)        printf 'Codex' ;;
+    cursor-agent) printf 'Cursor Agent' ;;
+    opencode)     printf 'OpenCode' ;;
+    pi)           printf 'Pi' ;;
+  esac
+}
+
+script_version() { sed -n 's/^VERSION="\(.*\)"$/\1/p' "$1" 2>/dev/null | head -1; }
+
+# The checkout this copy runs from, when it is one, so the agent reads the docs
+# that match the code.
+doc_ref() { # repo-relative path
+  local f
+  f="$(dirname "$(dirname "$SCRIPT_PATH")")/$1"
+  if [[ -f "$f" ]]; then printf '%s' "$f"
+  else printf 'https://github.com/%s/blob/main/%s' "$UPSTREAM" "$1"; fi
+}
+
+triage_prompt() {
+  local installed="not installed" config="missing -- setup may never have finished"
+  local here="a directory no identity owns" name
+  [[ ! -f "$BIN_DIR/guise" ]] || installed="$BIN_DIR/guise, version $(script_version "$BIN_DIR/guise")"
+  [[ ! -f "$CONFIG_FILE" ]] || config="present"
+  if [[ -f "$CONFIG_FILE" ]] && name=$(identity_from_cwd); then
+    here="identity '$name''s directory"
+  fi
+
+  cat <<EOF
+You're helping someone figure out what's wrong with their guise setup. guise
+gives coding agents a GitHub identity of their own, so commits and pushes made
+under an identity's directory come from a separate GitHub account or App bot
+instead of the human you're talking to.
+
+What we already know:
+- guise $VERSION, run from $SCRIPT_PATH
+- installed copy: $installed
+- config: $CONFIG_FILE ($config)
+- triage was started from $PWD, $here
+- $(uname -sr)
+
+1. First ask them, in their own words, what they ran, what they expected, and
+   what happened instead -- and to paste the exact error or a screenshot. Wait
+   for the answer before investigating.
+2. Run \`guise doctor\`. It covers a lot but not everything, so a green doctor
+   doesn't clear guise.
+3. Read the source. One bash script is the whole tool, and the helpers, hooks
+   and git config it installs are heredocs inside it:
+     $SCRIPT_PATH
+   The troubleshooting guide is keyed to real failure modes:
+     $(doc_ref docs/troubleshooting.md)
+4. Look at their machine: ~/.gitconfig, ~/.config/guise/, \`guise list\`, and
+   \`git config --show-origin --list\` and \`git remote -v\` in the repo that
+   misbehaved.
+5. Tell them the root cause, the evidence, and the fix, keeping what you
+   verified apart from what you suspect.
+
+Ground rules:
+- Ask before changing anything on their machine. Never run \`guise uninstall\`,
+  \`rm\` or \`rename\` yourself, and fix rendered files with \`guise update\`,
+  not by hand.
+- Never print a secret: no \`guise token\`, no unfiltered
+  \`git credential fill\`, nothing read from ~/.config/guise/keys/,
+  ~/.cache/guise/ or 1Password. If they paste a token or key, tell them to
+  revoke it.
+
+If the bug is in guise itself rather than their setup, offer at the end to open
+a pull request with the fix. It has to come from an identity with its own
+GitHub account (kind "user" in \`guise list\`); an App bot can't fork or push
+to $UPSTREAM. With one that works:
+  \`guise clone $UPSTREAM --name <identity>\`, then
+  \`guise-gh repo fork --remote\` inside the clone, and follow its AGENTS.md.
+Use \`guise-gh\`, never plain \`gh\`, which is logged in as the human. Without
+one, give them the diff and suggest an account identity for next time.
+EOF
+}
+
+launch_harness() { # harness prompt
+  case "$1" in
+    opencode) exec opencode --prompt "$2" ;;
+    *)        exec "$1" "$2" ;;
+  esac
+}
+
+cmd_triage() {
+  local harness="" print="" found="" h prompt
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --harness) harness="${2:-}"; shift 2 || die "triage: --harness needs a value" ;;
+      --print)   print=1; shift ;;
+      *) die "triage: unknown flag '$1'" ;;
+    esac
+  done
+  if [[ -n "$harness" ]]; then
+    case " $HARNESSES " in
+      *" $harness "*) ;;
+      *) die "triage: unknown harness '$harness' (supported: $HARNESSES)" ;;
+    esac
+    command -v "$harness" >/dev/null || die "triage: $harness is not on your PATH"
+  fi
+
+  prompt=$(triage_prompt)
+  if [[ -n "$print" ]]; then say "$prompt"; return 0; fi
+  [[ -z "$harness" ]] || launch_harness "$harness" "$prompt"
+
+  # Without a terminal there is nothing to hold a session, and the prompt is
+  # what the caller -- a pipe, or an agent already in a session -- can use.
+  if [[ ! -t 0 || ! -t 1 ]]; then say "$prompt"; return 0; fi
+
+  for h in $HARNESSES; do
+    if command -v "$h" >/dev/null; then found="$found $h"; fi
+  done
+  if [[ -z "$found" ]]; then
+    warn "found none of $HARNESSES on your PATH -- paste this into the one you use:"
+    say ""
+    say "$prompt"
+    return 0
+  fi
+
+  wz_init
+  WZ_CMD="triage"
+  wz_line ""
+  wz_line "${WZ_DIM}┌${WZ_OFF}  ${WZ_INV} guise ${WZ_OFF}  ${WZ_BOLD}Let's figure out what's going on${WZ_OFF}"
+  wz_bar
+  wz_bar "An agent will ask what went wrong, then read guise's source, run"
+  wz_bar "guise doctor, and look around your machine. It asks before it changes"
+  wz_bar "anything. Paste it error text or screenshots as you go -- never a"
+  wz_bar "token or a key."
+  wz_bar
+
+  local opts=()
+  for h in $found; do opts+=("$h" "$(harness_label "$h")" ""); done
+  opts+=(print "Just print the prompt" "to paste into a harness of your own")
+  wz_select harness "Which harness should run it?" "${opts[@]}"
+  if [[ "$harness" == "print" ]]; then
+    wz_line "${WZ_DIM}└${WZ_OFF}"
+    say "$prompt"
+    return 0
+  fi
+  wz_line "${WZ_DIM}└${WZ_OFF}  Starting $(harness_label "$harness")..."
+  launch_harness "$harness" "$prompt"
+}
+
+# ---------------------------------------------------------------------------
 # uninstall
 # ---------------------------------------------------------------------------
 
@@ -3221,6 +3373,12 @@ usage: guise <command> [flags]
                             terminal. [--no-wizard] to insist on flags.
   doctor     verify the whole chain; non-zero exit on any failure
              [--name <identity>]
+  triage     start a session in your coding harness (claude, codex,
+             cursor-agent, opencode, pi) to work out what's wrong, with a
+             prompt that points it at the source, doctor, and your machine
+             [--harness <name>]  skip the menu
+             [--print]           print the prompt instead; also what happens
+                                 with no terminal or no harness found
   uninstall  remove all wiring; leaves keys + clones alone  [-y]
   clone      clone a repo into the agent directory so the identity applies
              <owner/repo | url> [--name <identity>]
@@ -3256,6 +3414,7 @@ EOF
 case "${1:-}" in
   setup)      shift; cmd_setup "$@" ;;
   doctor)     shift; cmd_doctor "$@" ;;
+  triage)     shift; cmd_triage "$@" ;;
   uninstall)  shift; cmd_uninstall "$@" ;;
   clone)      shift; cmd_clone "$@" ;;
   use)        shift; cmd_use "$@" ;;
