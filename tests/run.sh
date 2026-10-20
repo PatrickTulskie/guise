@@ -748,8 +748,15 @@ expect_eq "the other identity still applies in its directory" \
 
 new_token_file "$SB/pat.txt"
 run_setup_user --store file --sign --token-file "$SB/pat.txt" >/dev/null 2>&1
+git clone -q "$SB/remote.git" "$user_dir/pushed" 2>/dev/null
+git clone -q "$SB/remote.git" "$user_dir/unpushed" 2>/dev/null
+git -C "$user_dir/unpushed" commit -q --allow-empty -m unpushed
 agent rm "$USER_IDENT" --force > "$SB/rm.out" 2>&1
 expect_eq "rm --force exits 0" "$?" "0"
+expect "naming the clone whose work it deleted unpushed" \
+  grep -q "^  $user_dir/unpushed\$" "$SB/rm.out"
+expect "and not the one that was pushed" \
+  test "$(grep -c "$user_dir/pushed" "$SB/rm.out")" = 0
 expect "--force takes the token" test ! -e "$keys/$USER_IDENT.token"
 expect "both halves of the signing key" \
   test ! -e "$keys/$USER_IDENT.signing" -a ! -e "$keys/$USER_IDENT.signing.pub"
