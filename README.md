@@ -351,6 +351,19 @@ directory, your own clones live anywhere else.** Inside that directory every git
 harness-specific configuration. Tell each harness one thing: use `guise-gh`
 instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 
+## Repositories with their own hooks
+
+Git runs exactly one hooks directory per repository, and inside an identity's
+directory that is guise's: the rendered conf points `core.hooksPath` at a
+dispatcher, one small script per hook git knows. Each runs the repository's
+own hook of that name first — from `.git/hooks`, so the pre-commit framework,
+lefthook, overcommit and hand-written hooks keep running on agent commits, and
+a failing one still refuses the commit — and then guise's, which adds your
+co-author trailer. Linked worktrees find the hooks of the repository they
+belong to. Outside an identity's directory the dispatcher adds nothing: a clone
+that `rm` left behind still runs its own hooks and puts no trailer on your
+commits.
+
 ## Commands
 
 | Command | What it does |
