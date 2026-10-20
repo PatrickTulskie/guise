@@ -360,6 +360,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 | `guise token` | print the identity's token (debugging / harness use) |
 | `guise default [name]` | show or change the identity used when none is named |
 | `guise rename <old> <new>` | rename an identity, its directory, and its key files |
+| `guise cp <identity> <new>` | a second workspace committing as the same account, without a second setup |
 | `guise rm [name]` | remove one identity; asks what should go with it, or takes flags saying so |
 | `guise basedir [path]` | show or move the workspace directory, clones included |
 | `guise which` | print the identity owning the current directory |
@@ -427,6 +428,29 @@ Clones you keep fall out of `includeIf` scope and **start committing as you**,
 the same as a clone left behind by a workspace move. `guise doctor` lists them.
 Removing the default identity hands the default to the only one left, or leaves
 it unset for `guise default <name>` when there are several.
+
+## A second workspace for the same identity
+
+Sometimes one directory per identity is one too few — a scratch area, or a
+second checkout of a repo with different work in flight. `cp` adds a name that
+commits as the same account, without the setup you already did:
+
+```bash
+guise cp patricktulskie-agent scratch
+guise clone someone/their-repo --name scratch   # → ~/agentic-code/scratch/
+```
+
+The copy takes its config from the source, including a workspace of its own if
+the source has one, so the new directory sits beside the old. A secret stored
+in a file is copied to a file of the copy's own under `~/.config/guise/keys/`,
+mode 600, so `rename` and `rm --secret` on either name touch only that name's
+files. A secret in 1Password is shared: same item, one place to rotate. A
+signing key is copied too, both halves — the public half is already on the
+account, and a fresh key would mean the browser step again.
+
+The default identity stays where it was. `cp` refuses a name or directory that
+already exists, and copies nothing until every file it needs is readable, so a
+refusal leaves nothing behind.
 
 ## Where the clones live
 
