@@ -35,12 +35,13 @@ expect "and names the Signing Key dropdown, not the authentication one" \
   grep -q 'Key type: Signing Key' "$SB/sign.out"
 expect_eq "nothing was ever posted to the key API" \
   "$(grep -c '/user/ssh_signing_keys' "$CURL_LOG")" "0"
+agent doctor > "$SB/doctor.out" 2>&1
 expect_eq "the registration check is the only failure" \
-  "$(agent doctor 2>&1 | grep -c '^  FAIL')" "1"
+  "$(grep -c '^  FAIL' "$SB/doctor.out")" "1"
 expect_eq "and it names the account" \
-  "$(agent doctor 2>&1 | grep -c "FAIL  signing key registered on @$USER_IDENT")" "1"
+  "$(grep -c "FAIL  signing key registered on @$USER_IDENT" "$SB/doctor.out")" "1"
 expect_eq "while commits already sign and verify locally" \
-  "$(agent doctor 2>&1 | grep -c 'ok    commits sign and verify in agent scope')" "1"
+  "$(grep -c 'ok    commits sign and verify in agent scope' "$SB/doctor.out")" "1"
 
 signrepo="$HOME/agentic-code/$USER_IDENT/signed"
 git init -q "$signrepo"
@@ -79,19 +80,21 @@ expect_eq "which still signs for the human outside scope" \
 grep -v '^	program = ' "$HOME/.config/guise/git/$USER_IDENT.conf" \
   | sed 's|^	signingkey = .*|	signingkey = key::ssh-ed25519 AAAA|' > "$SB/old.conf"
 cat "$SB/old.conf" > "$HOME/.config/guise/git/$USER_IDENT.conf"
+agent doctor > "$SB/doctor.out" 2>&1
 expect_eq "doctor names an inherited signer" \
-  "$(agent doctor 2>&1 | grep -c 'FAIL  agent scope signs with ssh-keygen')" "1"
+  "$(grep -c 'FAIL  agent scope signs with ssh-keygen' "$SB/doctor.out")" "1"
 expect "and points at update" \
-  sh -c "'$ROOT/bin/guise' doctor 2>&1 | grep -A2 'FAIL  agent scope signs with ssh-keygen' | grep -q \"guise update\""
+  sh -c "grep -A2 'FAIL  agent scope signs with ssh-keygen' '$SB/doctor.out' | grep -q 'guise update'"
 # A literal would send signing to an ssh-agent, which holds the human's keys.
 expect_eq "and a signingkey that is not the identity's key file" \
-  "$(agent doctor 2>&1 | grep -c "FAIL  agent scope signs with the identity's own key file")" "1"
+  "$(grep -c "FAIL  agent scope signs with the identity's own key file" "$SB/doctor.out")" "1"
 agent update >/dev/null 2>&1
 expect_eq "update re-renders the conf" "$?" "0"
+agent doctor > "$SB/doctor.out" 2>&1
 expect_eq "and the signer check passes again" \
-  "$(agent doctor 2>&1 | grep -c 'ok    agent scope signs with ssh-keygen')" "1"
+  "$(grep -c 'ok    agent scope signs with ssh-keygen' "$SB/doctor.out")" "1"
 expect_eq "as does the key file check" \
-  "$(agent doctor 2>&1 | grep -c "ok    agent scope signs with the identity's own key file")" "1"
+  "$(grep -c "ok    agent scope signs with the identity's own key file" "$SB/doctor.out")" "1"
 
 # Paste the key into the account's signing keys page, the way a human does.
 echo "once the key is on the account:"
