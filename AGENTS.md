@@ -157,10 +157,12 @@ The whole point of this tool is credential separation, so:
 
 - **Never put a secret in argv.** `ps` shows arguments to same-user processes,
   and the agent runs as the same user. Feed subprocesses through a
-  builtin-driven process substitution or a pipe — `curl --config <(printf ...)`,
-  `openssl dgst -sha256 -sign <(read_key) -binary`, a JSON template piped into
-  `op item edit` — never `-H "Authorization: ..."`, an `op` assignment
-  statement, or `jq --arg`.
+  builtin-driven pipe or process substitution — a config file printed into
+  `curl --config -`, `openssl dgst -sha256 -sign <(read_key) -binary`, a JSON
+  template piped into `op item edit` — never `-H "Authorization: ..."`, an
+  `op` assignment statement, or `jq --arg`. Prefer stdin where the program
+  takes it: a native Windows program cannot open the `/dev/fd` path a process
+  substitution hands it (see Git Bash below).
 - Secrets live in 1Password, or on disk at mode 600 under
   `~/.config/guise/keys/`. Never under the agent workspace: agents roam there
   and can commit what they read.

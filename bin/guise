@@ -355,13 +355,15 @@ ask_secret() { # varname "prompt"
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 # Every authenticated GitHub call goes through here. The bearer -- a PAT, an
-# App JWT, or an installation token -- reaches curl through a config file on a
-# pipe, never argv, so it never shows in ps.
+# App JWT, or an installation token -- reaches curl as a config file on stdin,
+# never argv, so it never shows in ps. stdin rather than a process
+# substitution: Git for Windows ships a native curl that cannot open /dev/fd.
 github_curl() { # bearer [curl args...] url
   local bearer="$1"; shift
-  curl -sf --config <(printf 'header = "Authorization: Bearer %s"\n' "$bearer") \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+  printf 'header = "Authorization: Bearer %s"\n' "$bearer" \
+    | curl -sf --config - \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" "$@"
 }
 
 # ---------------------------------------------------------------------------
@@ -450,13 +452,15 @@ fi
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 read_key() { read_secret private_key keyfile; }
 
-# The JWT, like every credential here, reaches curl through a config file on a
-# pipe rather than argv, so it never shows in ps.
+# The JWT, like every credential here, reaches curl as a config file on stdin
+# rather than argv, so it never shows in ps. stdin rather than a process
+# substitution: Git for Windows ships a native curl that cannot open /dev/fd.
 github_curl() { # bearer [curl args...] url
   local bearer="$1"; shift
-  curl -sf --config <(printf 'header = "Authorization: Bearer %s"\n' "$bearer") \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+  printf 'header = "Authorization: Bearer %s"\n' "$bearer" \
+    | curl -sf --config - \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" "$@"
 }
 
 # Token acquisition lives in this one function so an alternate source
