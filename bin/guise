@@ -50,7 +50,24 @@ say()  { printf '%s\n' "$*"; }
 warn() { printf 'guise: %s\n' "$*" >&2; }
 die()  { printf 'guise: error: %s\n' "$*" >&2; exit 1; }
 
-cfg_get()   { git config -f "$CONFIG_FILE" --get "$1" 2>/dev/null; }
+# What comes back out of guise's own config. On Git Bash a path went in through
+# a native git, and MSYS rewrote it to C:/Users/... in that git's argv on the
+# way; the rest of this script compares paths as strings, so it comes back out
+# the way the shell spells it.
+posix_path() {
+  case "$1" in
+    [A-Za-z]:[/\\]*) if command -v cygpath >/dev/null; then cygpath -u "$1"; return; fi ;;
+  esac
+  printf '%s\n' "$1"
+}
+cfg_get() {
+  local v
+  v=$(git config -f "$CONFIG_FILE" --get "$1" 2>/dev/null) || return 1
+  posix_path "$v"
+}
+cfg_get_all() {
+  git config -f "$CONFIG_FILE" --get-all "$1" 2>/dev/null | while read -r v; do posix_path "$v"; done
+}
 cfg_set()   { git config -f "$CONFIG_FILE" "$1" "$2"; }
 cfg_unset() { git config -f "$CONFIG_FILE" --unset "$1" 2>/dev/null || true; }
 
@@ -68,6 +85,12 @@ shred_file() {
 # stat -f prints filesystem info to stdout *before* failing, so a BSD-first
 # fallback would concatenate garbage onto the real answer on Linux.
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
+
+# Git Bash mounts NTFS noacl: chmod is a no-op there and every file reads 644,
+# so a mode check can never pass. What keeps keys/ private on Windows is the
+# ACL on the profile directory, which doctor names instead of a mode.
+modes_apply() { case "$(uname -s)" in MINGW*|MSYS*) return 1 ;; *) return 0 ;; esac; }
+mode_600() { ! modes_apply || [[ "$(file_mode "$1")" == "600" ]]; }
 
 # Resolve a path for comparison: symlinks followed, "." and ".." folded, and a
 # tail that does not exist yet carried along. Comparing paths as typed is what
@@ -105,11 +128,18 @@ canonical_path() { # path -> resolved path
   printf '%s' "$out"
 }
 
+# A path for git to read out of a file. Git for Windows is a native program:
+# MSYS rewrites POSIX paths in its argv on the way in, never inside a file the
+# shell wrote, so a /c/Users path in a rendered conf is silently ignored there.
+git_path() {
+  if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
 # ~-form for values written into git config files
 display_path() {
   case "$1" in
     "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
-    *)         printf '%s' "$1" ;;
+    *)         git_path "$1" ;;
   esac
 }
 
@@ -354,6 +384,17 @@ ask_secret() { # varname "prompt"
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
+# A private key reaches openssl as the /dev/fd path of a process substitution:
+# never argv, never disk. Git for Windows puts a native openssl first on PATH,
+# which cannot open one, and ships the MSYS build beside it, which can.
+openssl_for_fd() {
+  local c
+  for c in openssl /usr/bin/openssl; do
+    "$c" dgst -sha256 <(printf x) >/dev/null 2>&1 && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
 # Every authenticated GitHub call goes through here. The bearer -- a PAT, an
 # App JWT, or an installation token -- reaches curl as a config file on stdin,
 # never argv, so it never shows in ps. stdin rather than a process
@@ -452,6 +493,17 @@ fi
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 read_key() { read_secret private_key keyfile; }
 
+# The key reaches openssl as the /dev/fd path of a process substitution: never
+# argv, never disk. Git for Windows puts a native openssl first on PATH, which
+# cannot open one, and ships the MSYS build beside it, which can.
+openssl_for_fd() {
+  local c
+  for c in openssl /usr/bin/openssl; do
+    "$c" dgst -sha256 <(printf x) >/dev/null 2>&1 && { printf '%s' "$c"; return 0; }
+  done
+  return 1
+}
+
 # The JWT, like every credential here, reaches curl as a config file on stdin
 # rather than argv, so it never shows in ps. stdin rather than a process
 # substitution: Git for Windows ships a native curl that cannot open /dev/fd.
@@ -466,15 +518,16 @@ github_curl() { # bearer [curl args...] url
 # Token acquisition lives in this one function so an alternate source
 # (e.g. a remote token service) is a single-body swap.
 mint_token() {
-  local now header payload signature jwt
+  local now header payload signature jwt ssl
+  ssl=$(openssl_for_fd) \
+    || die "no openssl here can read a key handed over on a pipe -- Git for Windows ships one at /usr/bin/openssl; otherwise run guise from WSL"
   now=$(date +%s)
   header=$(printf '{"typ":"JWT","alg":"RS256"}' | b64url)
   # iat backdated 60s for clock skew; GitHub rejects exp > 10 min out
   payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$APP_ID" | b64url)
 
-  # PEM reaches openssl via process substitution -- never leaves its store.
   signature=$(printf '%s.%s' "$header" "$payload" \
-    | openssl dgst -sha256 -sign <(read_key) -binary \
+    | "$ssl" dgst -sha256 -sign <(read_key) -binary \
     | b64url)
   jwt="${header}.${payload}.${signature}"
 
@@ -920,8 +973,8 @@ render_identity_conf() { # name
     key=$(signing_key "$name")
     [[ -f "$key" && -f "$key.pub" ]] \
       || die "identity '$name' signs commits but its key is gone from $key -- re-run 'guise setup --sign'"
-    signing=$(signing_on_block "$(allowed_signers "$name")")
-    signingkey=$(printf '\n\tsigningkey = %s' "$key")
+    signing=$(signing_on_block "$(git_path "$(allowed_signers "$name")")")
+    signingkey=$(printf '\n\tsigningkey = %s' "$(git_path "$key")")
     # namespaces="git" stops this key vouching for anything but commits and
     # tags, which is all it is ever asked to sign.
     printf '%s namespaces="git" %s\n' "$(git_email "$name")" "$(pubkey_body "$key.pub")" \
@@ -936,8 +989,8 @@ render_identity_conf() { # name
   tmpl=${tmpl//"{{SIGNINGKEY}}"/$signingkey}
   tmpl=${tmpl//"{{SIGNING}}"/$signing}
   tmpl=${tmpl//"{{NAME}}"/$name}
-  tmpl=${tmpl//"{{BIN_DIR}}"/$BIN_DIR}
-  tmpl=${tmpl//"{{DISPATCH_DIR}}"/$DISPATCH_DIR}
+  tmpl=${tmpl//"{{BIN_DIR}}"/$(git_path "$BIN_DIR")}
+  tmpl=${tmpl//"{{DISPATCH_DIR}}"/$(git_path "$DISPATCH_DIR")}
   printf '%s\n' "$tmpl" > "$RENDER_DIR/$name.conf"
 }
 
@@ -949,7 +1002,7 @@ regen_owned_gitconfig() {
     echo "# Generated by guise -- do not hand-edit; re-run 'guise setup' instead."
     for name in $(list_identities); do
       echo
-      echo "[includeIf \"gitdir:$(display_path "$(identity_dir "$name")/")\"]"
+      echo "[includeIf \"gitdir:$(display_path "$(identity_dir "$name")")/\"]"
       printf '\tpath = git/%s.conf\n' "$name"
     done
   } > "$OWNED_GITCONFIG"
@@ -1977,12 +2030,14 @@ cmd_setup() {
 
     # --- discover slug, installation id, bot user id -----------------------
     say "==> discovering app metadata from GitHub"
-    local now header payload signature jwt
+    local now header payload signature jwt ssl
+    ssl=$(openssl_for_fd) \
+      || die "no openssl here can read a key handed over on a pipe -- Git for Windows ships one at /usr/bin/openssl; otherwise run guise from WSL"
     now=$(date +%s)
     header=$(printf '{"typ":"JWT","alg":"RS256"}' | b64url)
     payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' "$((now - 60))" "$((now + 540))" "$app_id" | b64url)
     signature=$(printf '%s.%s' "$header" "$payload" \
-      | openssl dgst -sha256 -sign <(printf '%s\n' "$secret_material") -binary | b64url)
+      | "$ssl" dgst -sha256 -sign <(printf '%s\n' "$secret_material") -binary | b64url)
     jwt="${header}.${payload}.${signature}"
 
     api() { github_curl "$jwt" "${GITHUB_API}$1"; }
@@ -2295,14 +2350,14 @@ chk_keyfile() {
   local f
   f=$(cfg_get "identity.$1.keyfile") || return 1
   [[ -f "$f" ]] || return 1
-  [[ "$(file_mode "$f")" == "600" ]] || return 1
+  mode_600 "$f" || return 1
   openssl pkey -in "$f" -noout 2>/dev/null
 }
 chk_tokenfile() {
   local f
   f=$(cfg_get "identity.$1.tokenfile") || return 1
   [[ -s "$f" ]] || return 1
-  [[ "$(file_mode "$f")" == "600" ]]
+  mode_600 "$f"
 }
 chk_token() {
   local t re='^ghs_'
@@ -2418,7 +2473,7 @@ chk_signing_key() {
   k=$(signing_key "$1")
   [[ -f "$k" && -f "$k.pub" ]] || return 1
   # Anything looser than 600 and another local account can sign as the agent.
-  [[ "$(file_mode "$k")" == "600" ]]
+  mode_600 "$k"
 }
 chk_signing_registered() {
   local k
@@ -2430,7 +2485,7 @@ chk_signing_registered() {
 # say -- would route signing to an ssh-agent, which holds the human's keys.
 _chk_signing_program() { [[ "$(git -C "$REPO" config --get gpg.ssh.program)" == "ssh-keygen" ]]; }
 chk_signing_program() { with_scoped_repo "$1" _chk_signing_program; }
-_chk_signingkey_path() { [[ "$(git -C "$REPO" config --get user.signingkey)" == "$(signing_key "$1")" ]]; }
+_chk_signingkey_path() { [[ "$(git -C "$REPO" config --get user.signingkey)" == "$(git_path "$(signing_key "$1")")" ]]; }
 chk_signingkey_path() { with_scoped_repo "$1" _chk_signingkey_path "$1"; }
 # End to end rather than by inspection: make a real commit inside agent scope
 # and verify it against the rendered allowed-signers file.
@@ -2457,11 +2512,11 @@ chk_human_untouched() {
 }
 chk_hook() { [[ -x "$HOOKS_DIR/prepare-commit-msg" ]]; }
 chk_dispatcher() { local h; for h in $GIT_HOOKS; do [[ -x "$DISPATCH_DIR/$h" ]] || return 1; done; }
-_chk_hookspath() { [[ "$(git -C "$REPO" config --get core.hooksPath)" == "$DISPATCH_DIR" ]]; }
+_chk_hookspath() { [[ "$(git -C "$REPO" config --get core.hooksPath)" == "$(git_path "$DISPATCH_DIR")" ]]; }
 chk_hookspath() { with_scoped_repo "$1" _chk_hookspath; }
 # The repository doctor runs in, when an identity owns it: a path the repo pins
 # itself wins over the conf, so this reads what git resolves, not the conf.
-chk_repo_hookspath() { [[ "$(git config --get core.hooksPath 2>/dev/null || true)" == "$DISPATCH_DIR" ]]; }
+chk_repo_hookspath() { [[ "$(git config --get core.hooksPath 2>/dev/null || true)" == "$(git_path "$DISPATCH_DIR")" ]]; }
 in_agent_repo() { git rev-parse --show-toplevel >/dev/null 2>&1 && identity_from_cwd >/dev/null 2>&1; }
 
 chk_shell_hook() {
@@ -2573,7 +2628,7 @@ stranded_clones() {
   # Workspace roots, plus the directories `rm` left clones in: an identity with
   # a workspace of its own takes the only record of that root with it.
   { basedirs | sed 's/^/3 /'
-    git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | sed 's/^/2 /' || true
+    cfg_get_all core.strandeddir | sed 's/^/2 /' || true
   } | while read -r depth root; do
     [[ -n "$root" && -d "$root" ]] || continue
     # A submodule's or worktree's .git is a file, and either is still a repo,
@@ -2588,13 +2643,13 @@ stranded_clones() {
 chk_no_stranded_clones() { [[ -z "$STRANDED" ]]; }
 
 stranded_record() { # dir
-  git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | grep -Fxq "$1" \
+  cfg_get_all core.strandeddir | grep -Fxq "$1" \
     || git config -f "$CONFIG_FILE" --add core.strandeddir "$1"
 }
 
 stranded_forget() { # dir
   local rest d
-  rest=$(git config -f "$CONFIG_FILE" --get-all core.strandeddir 2>/dev/null | grep -Fxv "$1" || true)
+  rest=$(cfg_get_all core.strandeddir | grep -Fxv "$1" || true)
   git config -f "$CONFIG_FILE" --unset-all core.strandeddir 2>/dev/null || true
   printf '%s\n' "$rest" | while read -r d; do
     [[ -z "$d" ]] || git config -f "$CONFIG_FILE" --add core.strandeddir "$d"
@@ -2645,7 +2700,8 @@ cmd_doctor() {
           chk_repo_hookspath
   fi
 
-  local names name
+  local names name mode=", mode 600"
+  modes_apply || mode=" (NTFS has no modes; the profile's ACL keeps it private)"
   names=$(list_identities)
   [[ -n "$names" ]] || die "no identities in config -- run 'guise setup'"
   if [[ -n "$only" ]]; then names="$only"; fi
@@ -2655,7 +2711,7 @@ cmd_doctor() {
     if [[ "$(identity_kind "$name")" == "user" ]]; then
       say "identity '$name' (account @$(cfg_get "identity.$name.login")):"
       if [[ "$(key_source "$name")" == "file" ]]; then
-        check "token file present, non-empty, mode 600" \
+        check "token file present, non-empty$mode" \
               "re-run setup with --store file --token-file, or chmod 600 $(cfg_get "identity.$name.tokenfile")" chk_tokenfile "$name"
       else
         check "1Password token reachable through $(op_reader "$name")" \
@@ -2683,7 +2739,7 @@ cmd_doctor() {
     else
       say "identity '$name' ($(cfg_get "identity.$name.slug") on $(cfg_get "identity.$name.owner")):"
       if [[ "$(key_source "$name")" == "file" ]]; then
-        check "key file present, valid, mode 600" \
+        check "key file present, valid$mode" \
               "re-run setup with --store file --pem, or chmod 600 $(cfg_get "identity.$name.keyfile")" chk_keyfile "$name"
       else
         check "1Password key reachable through $(op_reader "$name")" \
@@ -2711,7 +2767,7 @@ cmd_doctor() {
           "run 'guise update' to re-render the conf; if it still fails, ~/.gitconfig sets core.hooksPath below the guise block, which wins -- move the guise block to the end" \
           chk_hookspath "$name"
     if signing_enabled "$name"; then
-      check "signing key present, mode 600" \
+      check "signing key present$mode" \
             "regenerate it with 'guise setup --sign --name $name'" chk_signing_key "$name"
       check "signing key registered on @$(cfg_get "identity.$name.login")" \
             "as the agent account, add $(signing_key "$name").pub at github.com/settings/ssh/new with Key type: Signing Key" \
@@ -2968,9 +3024,9 @@ cmd_uninstall() {
 setup_repo_hooks() { # repo dir
   local current
   current=$(git -C "$1" config --local --get core.hooksPath 2>/dev/null || true)
-  [[ -n "$current" && "$current" != "$DISPATCH_DIR" ]] || return 0
+  [[ -n "$current" && "$current" != "$(git_path "$DISPATCH_DIR")" ]] || return 0
   git -C "$1" config --local guise.innerhookspath "$current"
-  git -C "$1" config --local core.hooksPath "$DISPATCH_DIR"
+  git -C "$1" config --local core.hooksPath "$(git_path "$DISPATCH_DIR")"
   say "hooks in $current now run through guise, ahead of its own"
 }
 
@@ -2981,7 +3037,7 @@ restore_repo_hooks() { # name
   local dir inner
   [[ -d "$(identity_dir "$1")" ]] || return 0
   identity_clones "$1" | while read -r dir; do
-    [[ "$(git -C "$dir" config --local --get core.hooksPath 2>/dev/null || true)" == "$DISPATCH_DIR" ]] || continue
+    [[ "$(git -C "$dir" config --local --get core.hooksPath 2>/dev/null || true)" == "$(git_path "$DISPATCH_DIR")" ]] || continue
     if inner=$(git -C "$dir" config --local --get guise.innerhookspath 2>/dev/null); then
       git -C "$dir" config --local core.hooksPath "$inner"
       git -C "$dir" config --local --unset guise.innerhookspath

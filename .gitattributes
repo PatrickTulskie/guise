@@ -1,0 +1,3 @@
+# Every script here is read by bash, on Windows too: a checkout made with
+# core.autocrlf on must not hand it CRLF line endings.
+* text=auto eol=lf

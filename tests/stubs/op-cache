@@ -13,7 +13,7 @@ cmd="${1:-}"; shift || true
 case "$cmd" in
   read)
     # The whole argument list is the key, as in the real one.
-    key=$(printf '%s\n' "$@" | shasum | cut -d' ' -f1)
+    key=$(printf '%s\n' "$@" | { shasum 2>/dev/null || sha1sum; } | cut -d' ' -f1)
     if [[ -f "$dir/$key" ]]; then cat "$dir/$key"; exit 0; fi
     # op wants its global flags before the subcommand; op-cache takes them after.
     account=()

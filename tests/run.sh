@@ -15,9 +15,12 @@ expect_eq() {
   if [[ "$got" == "$want" ]]; then ok "$desc"; else bad "$desc (got '$got', want '$want')"; fi
 }
 expect_fail() { local desc="$1"; shift; if "$@" >/dev/null 2>&1; then bad "$desc"; else ok "$desc"; fi }
+skip() { printf '  skip  %s\n' "$1"; }
 
 new_sandbox() {
-  SB=$(mktemp -d)
+  # pwd rather than what mktemp printed: on Git Bash that may be a Windows
+  # spelling, and every path below is compared as a string.
+  SB=$(cd "$(mktemp -d)" && pwd)
   export HOME="$SB/home"
   mkdir -p "$HOME"
   export XDG_CACHE_HOME="$HOME/.cache"
@@ -60,9 +63,24 @@ agent() { "$ROOT/bin/guise" "$@" </dev/null; }
 
 new_token_file() { printf 'github_pat_stub123\n' > "$1"; }
 
-cfg() { git config -f "$HOME/.config/guise/config" --get "$1"; }
+# Paths read back from a config come in the spelling the native git stored --
+# C:/Users/... on Git Bash, where MSYS rewrote the argv it was written with.
+cfg() {
+  local v
+  v=$(git config -f "$HOME/.config/guise/config" --get "$1") || return 1
+  case "$v" in [A-Za-z]:/*) cygpath -u "$v" ;; *) printf '%s\n' "$v" ;; esac
+}
+# And the other way round, for a path the suite wrote and git will read back.
+git_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
+# Git Bash mounts NTFS noacl: chmod is a no-op and every file reads 644.
+modes_apply() { case "$(uname -s)" in MINGW*|MSYS*) return 1 ;; *) return 0 ;; esac; }
+expect_mode() { # desc file mode
+  if modes_apply; then expect_eq "$1" "$(file_mode "$2")" "$3"
+  else skip "$1 (no POSIX modes on this filesystem)"; fi
+}
+digest() { if command -v shasum >/dev/null; then shasum; else sha1sum; fi; }
 
 # setup names an identity after the account it belongs to, so these are the
 # names the stubbed app slug and account login produce.
@@ -79,7 +97,7 @@ snapshot() {
       "$HOME/.config/guise/git/agent-hooks/prepare-commit-msg" \
       "$HOME/.local/bin/guise-token" \
       "$HOME/.local/bin/guise-credential" \
-      "$HOME/.local/bin/guise-gh" 2>/dev/null | shasum | cut -d' ' -f1
+      "$HOME/.local/bin/guise-gh" 2>/dev/null | digest | cut -d' ' -f1
 }
 
 # --- version --------------------------------------------------------------------
@@ -487,8 +505,7 @@ run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "file-store setup exits 0" "$?" "0"
 keyfile="$HOME/.config/guise/keys/$APP_IDENT.pem"
 expect "key file written" test -f "$keyfile"
-expect_eq "key file mode 600" \
-  "$(stat -c '%a' "$keyfile" 2>/dev/null || stat -f '%Lp' "$keyfile")" "600"
+expect_mode "key file mode 600" "$keyfile" "600"
 expect_eq "keysource recorded" "$(cfg identity.$APP_IDENT.keysource)" "file"
 expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/test-agent"
 expect "PEM shredded after storing" test ! -e "$SB/key.pem"
@@ -688,8 +705,7 @@ printf 'github_pat_filestore\n' > "$SB/pat.txt"
 expect_eq "file-store user setup exits 0" "$?" "0"
 tokenfile="$HOME/.config/guise/keys/$USER_IDENT.token"
 expect "token file written" test -f "$tokenfile"
-expect_eq "token file mode 600" \
-  "$(stat -c '%a' "$tokenfile" 2>/dev/null || stat -f '%Lp' "$tokenfile")" "600"
+expect_mode "token file mode 600" "$tokenfile" "600"
 expect "nothing written to 1Password" test ! -e "$OP_FAKE_DIR/Private/patrick-agent"
 expect_eq "token helper reads the file" \
   "$("$HOME/.local/bin/guise-token" "$USER_IDENT")" "github_pat_filestore"
@@ -1057,7 +1073,7 @@ git -C "$user_dir/someclone" commit -q --allow-empty -m pushed
 git -C "$user_dir/someclone" push -q origin HEAD 2>/dev/null
 git -C "$user_dir/someclone" checkout -q --detach
 git -C "$user_dir/someclone" commit -q --allow-empty -m unpushed
-rm_snap() { cat "$HOME/.config/guise/config" "$HOME/.config/guise/gitconfig" | shasum; }
+rm_snap() { cat "$HOME/.config/guise/config" "$HOME/.config/guise/gitconfig" | digest; }
 before=$(rm_snap)
 
 expect_fail "a bare rm with no terminal refuses rather than guessing" agent rm "$USER_IDENT"
@@ -1607,7 +1623,7 @@ if command -v zsh >/dev/null; then
         'cd "$HOME"; . "$HOME/.config/guise/hook.sh"; guise use platform; printf %s "$PWD"')" \
     "$HOME/agentic-code/platform"
 else
-  echo "  skip  sourcing the hook makes use cd the running zsh (zsh not installed)"
+  skip "sourcing the hook makes use cd the running zsh (zsh not installed)"
 fi
 
 # The hook evals what --emit-shell printed, so an apostrophe anywhere in the
@@ -1660,7 +1676,7 @@ expect_eq "the rc block lands in the file the link points at" \
   "$(grep -cF '# >>> guise >>>' "$HOME/dotfiles/zshrc")" "1"
 expect_eq "and the gitconfig block does too" \
   "$(grep -cF '# >>> guise >>>' "$HOME/dotfiles/gitconfig")" "1"
-expect_eq "the target's mode is untouched" "$(file_mode "$HOME/dotfiles/zshrc")" "640"
+expect_mode "the target's mode is untouched" "$HOME/dotfiles/zshrc" "640"
 
 # The replace path, which only runs when a block is already there and differs.
 # It spans lines, and `awk -v` cannot carry a newline -- BWK awk on macOS errors
@@ -1753,8 +1769,7 @@ expect_eq "signing recorded in config" "$(cfg identity.$USER_IDENT.signing)" "ss
 expect_eq "signingkey points into the keys dir" "$(cfg identity.$USER_IDENT.signingkey)" "$signkey"
 expect "private half generated" test -f "$signkey"
 expect "public half written alongside" test -f "$signkey.pub"
-expect_eq "private half is mode 600" \
-  "$(stat -c '%a' "$signkey" 2>/dev/null || stat -f '%Lp' "$signkey")" "600"
+expect_mode "private half is mode 600" "$signkey" "600"
 expect "an ed25519 key" grep -q '^ssh-ed25519 ' "$signkey.pub"
 # Agents roam the workspace; a signing key there is one they could commit.
 expect_eq "nothing signing-shaped under the agent workspace" \
@@ -1782,7 +1797,7 @@ expect_eq "gpgsign on inside scope" "$(git -C "$signrepo" config --get commit.gp
 expect_eq "tags sign too" "$(git -C "$signrepo" config --get tag.gpgsign)" "true"
 expect_eq "ssh signature format inside scope" "$(git -C "$signrepo" config --get gpg.format)" "ssh"
 expect_eq "signing key resolves inside scope" \
-  "$(git -C "$signrepo" config --get user.signingkey)" "$signkey"
+  "$(git -C "$signrepo" config --get user.signingkey)" "$(git_path "$signkey")"
 expect_eq "human gpgsign untouched outside scope" \
   "$(git -C "$SB" config --get commit.gpgsign)" "true"
 expect_fail "and no ssh format leaked into the human's config" \
@@ -1807,7 +1822,7 @@ expect_eq "a commit still carries a good signature" \
   "$(git -C "$signrepo" log -1 --format='%G? %s')" "G signed despite the human's signer"
 expect "and the human's signer was never invoked" test ! -e "$SB/human-signer.log"
 expect_eq "which still signs for the human outside scope" \
-  "$(git -C "$SB" config --get gpg.ssh.program)" "$SB/human-signer"
+  "$(git -C "$SB" config --get gpg.ssh.program)" "$(git_path "$SB/human-signer")"
 # A conf rendered before the program line existed: doctor has to name the
 # problem, and update -- not setup -- is what repairs it.
 grep -v '^	program = ' "$HOME/.config/guise/git/$USER_IDENT.conf" \
@@ -2136,13 +2151,19 @@ in_pty() { # "command" -- stdin is what gets typed
   rm -f "$done"
   return $rc
 }
+# Git for Windows has no `script`, and so no way to hand the tool a terminal.
+have_pty() { command -v script >/dev/null; }
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
-  | TERM=dumb in_pty "'$ROOT/bin/guise' setup" > "$SB/dumb.out" 2>&1
-grep -q "Look good?" "$SB/dumb.out" || sed 's/^/    | /' "$SB/dumb.out"
-expect "a bare setup on a dumb terminal still runs the wizard" \
-  grep -q "Look good?" "$SB/dumb.out"
-expect_fail "without a single escape sequence" grep -q $'\033' "$SB/dumb.out"
+if have_pty; then
+  printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
+    | TERM=dumb in_pty "'$ROOT/bin/guise' setup" > "$SB/dumb.out" 2>&1
+  grep -q "Look good?" "$SB/dumb.out" || sed 's/^/    | /' "$SB/dumb.out"
+  expect "a bare setup on a dumb terminal still runs the wizard" \
+    grep -q "Look good?" "$SB/dumb.out"
+  expect_fail "without a single escape sequence" grep -q $'\033' "$SB/dumb.out"
+else
+  skip "a bare setup on a dumb terminal still runs the wizard (no script, so no pty)"
+fi
 
 # The wizard is what a bare setup does *on a terminal*. With no terminal there
 # is nothing to ask, so the flag-driven refusal stands.
@@ -2166,7 +2187,7 @@ awk '{print $1" "$2}' "$HOME/.config/guise/keys/$USER_IDENT.signing.pub" \
 
 confdir="$HOME/.config/guise/git"
 cfgfile="$HOME/.config/guise/config"
-cfg_before=$(shasum < "$cfgfile")
+cfg_before=$(digest < "$cfgfile")
 # Clobber everything update owns; leave everything it must not touch alone.
 echo broken > "$HOME/.local/bin/guise-gh"
 echo broken > "$HOME/.config/guise/hook.sh"
@@ -2199,7 +2220,7 @@ expect "token helper reinstalled" grep -q 'guise-token' "$HOME/.local/bin/guise-
 expect "commit hook reinstalled" grep -q 'Co-authored-by' "$confdir/agent-hooks/prepare-commit-msg"
 expect "hook dispatcher reinstalled" test -x "$confdir/hooks/pre-commit"
 expect "shell hook reinstalled" grep -q 'emit-shell' "$HOME/.config/guise/hook.sh"
-expect_eq "config left byte-identical" "$(shasum < "$cfgfile")" "$cfg_before"
+expect_eq "config left byte-identical" "$(digest < "$cfgfile")" "$cfg_before"
 # A bare `setup` re-renders only the identity it ran for; update does all of them.
 expect "app identity conf re-rendered" \
   grep -q '3333+test-agent\[bot\]@users\.noreply\.github\.com' "$confdir/$APP_IDENT.conf"
@@ -2300,14 +2321,18 @@ expect "so is one that isn't installed" \
   grep -qF "pi is not on your PATH" <<<"$(PATH="/usr/bin:/bin" agent triage --harness pi 2>&1)"
 
 # On a terminal it asks which harness; enter takes the first one found.
-rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
-printf '\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$ROOT/bin/guise' triage" > "$SB/triage.out" 2>&1
-expect "on a terminal, triage offers the harnesses it found" grep -q "Claude Code" "$SB/triage.out"
-expect_eq "and launches the one picked" "$(cat "$SB/harness/claude.arg1" 2>/dev/null)" "$prompt"
-rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
-printf 'print\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$ROOT/bin/guise' triage" > "$SB/triage.out" 2>&1
-expect "or prints the prompt when asked to" grep -q "You're helping someone" "$SB/triage.out"
-expect "without launching anything" test ! -e "$SB/harness/claude.cwd"
+if have_pty; then
+  rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
+  printf '\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$ROOT/bin/guise' triage" > "$SB/triage.out" 2>&1
+  expect "on a terminal, triage offers the harnesses it found" grep -q "Claude Code" "$SB/triage.out"
+  expect_eq "and launches the one picked" "$(cat "$SB/harness/claude.arg1" 2>/dev/null)" "$prompt"
+  rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
+  printf 'print\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$ROOT/bin/guise' triage" > "$SB/triage.out" 2>&1
+  expect "or prints the prompt when asked to" grep -q "You're helping someone" "$SB/triage.out"
+  expect "without launching anything" test ! -e "$SB/harness/claude.cwd"
+else
+  skip "on a terminal, triage offers the harnesses it found (no script, so no pty)"
+fi
 
 # --- uninstall restores prior state ------------------------------------------
 echo "uninstall:"
