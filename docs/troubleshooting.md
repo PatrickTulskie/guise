@@ -80,6 +80,31 @@ git pull && ./bin/guise update
 Credit that a replayed commit already carries is left as it is — the hook only
 adds your trailer to commits the identity actually authored.
 
+## The repo's pre-commit hooks don't run in agent scope
+
+**Cause:** an identity conf rendered before the dispatcher existed. Git runs
+one hooks directory per repository, and that conf pointed `core.hooksPath`
+straight at guise's own hook directory, which holds nothing but
+`prepare-commit-msg` — so `.git/hooks` went unread on every agent commit: no
+linters, no secret scanners. The current conf names a dispatcher that runs the
+repository's hook first, then guise's. Update to get it:
+
+```bash
+git pull && ./bin/guise update
+```
+
+`doctor` covers this as "hook dispatcher installed" and "agent scope runs hooks
+through the dispatcher".
+
+A hook still skipped afterwards isn't executable (`.sample` files never are),
+or was never written: `pre-commit install` refuses to run while
+`core.hooksPath` is set, which inside an identity's directory it always is.
+Mask the setting for that one command and it writes to `.git/hooks` as usual:
+
+```bash
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0= pre-commit install
+```
+
 ## Push rejected: signed commits required
 
 **Cause:** the repo (or its org) has a signature ruleset and the agent isn't

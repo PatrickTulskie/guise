@@ -117,11 +117,11 @@ The image caches; rebuild it with `docker compose build` after changing
 
 ## The script is self-contained
 
-`guise-token`, `guise-credential`, `guise-gh`, the commit hook, the shell
-hook, and the git config template are **heredocs inside `bin/guise`**
-(`write_helper_*`, `write_hook`, `write_shell_hook`, `agent_conf_template`,
-`signing_*_block`). `setup` writes them into `~/.local/bin` and
-`~/.config/guise/`.
+`guise-token`, `guise-credential`, `guise-gh`, the commit hook, the hook
+dispatcher, the shell hook, and the git config template are **heredocs inside
+`bin/guise`** (`write_helper_*`, `write_hook`, `write_dispatcher`,
+`write_shell_hook`, `agent_conf_template`, `signing_*_block`). `setup` writes
+them into `~/.local/bin` and `~/.config/guise/`.
 
 Editing an installed copy changes nothing that ships. Edit the heredoc.
 

@@ -111,6 +111,7 @@ expect "helpers installed" test -x "$HOME/.local/bin/guise-token"
 expect "credential helper installed" test -x "$HOME/.local/bin/guise-credential"
 expect "guise-gh installed" test -x "$HOME/.local/bin/guise-gh"
 expect "hook installed" test -x "$HOME/.config/guise/git/agent-hooks/prepare-commit-msg"
+expect "hook dispatcher installed" test -x "$HOME/.config/guise/git/hooks/prepare-commit-msg"
 expect "identity dir created" test -d "$HOME/agentic-code/$APP_IDENT"
 expect "AGENTS.md dropped in workspace" test -f "$HOME/agentic-code/AGENTS.md"
 expect "CLAUDE.md imports AGENTS.md" grep -q '@AGENTS.md' "$HOME/agentic-code/CLAUDE.md"
@@ -337,6 +338,60 @@ expect_eq "a stale guise ahead on PATH is a warning, not a failure" "$?" "0"
 expect_eq "that names the copy and its version" \
   "$(hint_for 'warn  guise on PATH is this version' "$SB/doctor.out")" \
   "$SB/stale/guise reports 'guise 0.0.1' and this is guise $this_version -- run 'guise update' from the newer copy, or remove the stale one"
+
+# --- a repository's own hooks keep running -----------------------------------
+# Git runs one hooks directory per repository and agent scope names guise's, so
+# everything a repo keeps in .git/hooks would otherwise go silent on agent
+# commits. A dispatcher stands in: the repo's hook first, then guise's.
+echo "repository hooks:"
+new_sandbox
+run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
+dispatch="$HOME/.config/guise/git/hooks"
+repo="$HOME/agentic-code/$APP_IDENT/plain"
+git init -q "$repo"
+expect_eq "agent scope points git at the dispatcher" \
+  "$(git -C "$repo" config --get core.hooksPath)" "$dispatch"
+expect "which has an entry for every hook git looks up by name" \
+  test -x "$dispatch/pre-commit" -a -x "$dispatch/pre-push" -a -x "$dispatch/reference-transaction"
+
+printf '#!/bin/sh\ntouch pre-commit-ran\nexit 1\n' > "$repo/.git/hooks/pre-commit"
+chmod +x "$repo/.git/hooks/pre-commit"
+( cd "$repo" && echo x > f && git add f && git commit -q -m "refused" ) >/dev/null 2>&1
+expect "a .git/hooks/pre-commit that fails runs" test -f "$repo/pre-commit-ran"
+expect_fail "and refuses the agent's commit" git -C "$repo" rev-parse -q --verify HEAD
+printf '#!/bin/sh\ntouch pre-commit-ok\n' > "$repo/.git/hooks/pre-commit"
+( cd "$repo" && git commit -q -m "allowed" ) >/dev/null 2>&1
+expect "one that passes lets it through" test -f "$repo/pre-commit-ok"
+expect_eq "with the co-author trailer still added after it" \
+  "$(git -C "$repo" log -1 --format=%B | grep -c '^Co-authored-by: Human <human@example.com>$')" "1"
+
+# A linked worktree has no hooks of its own; the main repository's apply.
+wt="$HOME/agentic-code/$APP_IDENT/plain-wt"
+git -C "$repo" worktree add -q "$wt" -b wt >/dev/null 2>&1
+( cd "$wt" && echo z > z && git add z && git commit -q -m "in a worktree" ) >/dev/null 2>&1
+expect "a hook in the main repo's .git/hooks runs for a commit in a linked worktree" \
+  test -f "$wt/pre-commit-ok"
+
+# Hooks git talks to on stdin have to hear it through the dispatcher.
+git init -q --bare "$SB/remote.git"
+git -C "$repo" remote add origin "$SB/remote.git"
+printf '#!/bin/sh\ncat > pre-push-stdin\n' > "$repo/.git/hooks/pre-push"
+chmod +x "$repo/.git/hooks/pre-push"
+git -C "$repo" push -q origin main >/dev/null 2>&1
+expect_eq "pre-push receives the ref lines git hands it on stdin" \
+  "$(cut -d' ' -f1,3 "$repo/pre-push-stdin" 2>/dev/null)" "refs/heads/main refs/heads/main"
+
+# A clone that left its identity's directory may still name the dispatcher.
+# Its own hooks keep running there; the human's commits get no trailer.
+stray="$SB/stray"
+git init -q "$stray"
+git -C "$stray" config --local core.hooksPath "$dispatch"
+printf '#!/bin/sh\ntouch stray-ran\n' > "$stray/.git/hooks/pre-commit"
+chmod +x "$stray/.git/hooks/pre-commit"
+( cd "$stray" && echo a > a && git add a && git -c commit.gpgsign=false commit -q -m "human commit" ) >/dev/null 2>&1
+expect "outside agent scope the dispatcher still runs the repo's own hooks" test -f "$stray/stray-ran"
+expect_eq "and adds no co-author trailer" \
+  "$(git -C "$stray" log -1 --format=%B | grep -c '^Co-authored-by:')" "0"
 
 # --- file key store ----------------------------------------------------------
 echo "file key store:"
@@ -1972,6 +2027,7 @@ echo broken > "$HOME/.local/bin/guise-gh"
 echo broken > "$HOME/.config/guise/hook.sh"
 echo broken > "$HOME/.local/bin/guise-token"
 echo broken > "$confdir/agent-hooks/prepare-commit-msg"
+rm -rf "$confdir/hooks"
 echo broken > "$confdir/$APP_IDENT.conf"
 echo broken > "$confdir/$USER_IDENT.conf"
 # The wiring too, or update could stop calling regen_owned_gitconfig and
@@ -1996,6 +2052,7 @@ expect_eq "and having made no API calls at all" "$(grep -c . "$CURL_LOG")" "0"
 expect "guise-gh reinstalled" grep -q GH_TOKEN "$HOME/.local/bin/guise-gh"
 expect "token helper reinstalled" grep -q 'guise-token' "$HOME/.local/bin/guise-token"
 expect "commit hook reinstalled" grep -q 'Co-authored-by' "$confdir/agent-hooks/prepare-commit-msg"
+expect "hook dispatcher reinstalled" test -x "$confdir/hooks/pre-commit"
 expect "shell hook reinstalled" grep -q 'emit-shell' "$HOME/.config/guise/hook.sh"
 expect_eq "config left byte-identical" "$(shasum < "$cfgfile")" "$cfg_before"
 # A bare `setup` re-renders only the identity it ran for; update does all of them.
