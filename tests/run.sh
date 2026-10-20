@@ -265,6 +265,24 @@ expect "the failure names the installation reachability check" \
 "$ROOT/bin/guise" doctor >/dev/null 2>&1
 expect_eq "doctor passes again once the installation has a repo" "$?" "0"
 
+# A guise-gh from before it checked the token puts guise-token's failure in an
+# assignment prefix, where exec discards it and gh runs as the human. Doctor
+# has to judge the installed copy, which only update rewrites.
+cat > "$HOME/.local/bin/guise-gh" <<'OLD'
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+GH_TOKEN="$("$HERE/guise-token" "${GUISE_IDENTITY:-}")" exec gh "$@"
+OLD
+agent doctor > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails on a guise-gh that runs gh when the token fails" "$?" "1"
+expect "the failure names the fail-closed check" \
+  grep -q "FAIL  guise-gh refuses to run gh without the identity's token" "$SB/doctor.out"
+expect "and its hint points at update" grep -q "run 'guise update'" "$SB/doctor.out"
+agent update >/dev/null 2>&1
+agent doctor >/dev/null 2>&1
+expect_eq "doctor passes once update reinstalls guise-gh" "$?" "0"
+
 # --- file key store ----------------------------------------------------------
 echo "file key store:"
 new_sandbox

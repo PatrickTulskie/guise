@@ -390,7 +390,10 @@ instead of `gh`" in `CLAUDE.md` and Cursor rules.
 `guise-gh` never falls back to that login. If it can't get the identity's token
 it exits before `gh` runs, with `guise-token`'s error above its own; fix that
 one (`guise doctor` names it) and re-run. Helpers installed before this check
-need a `guise update` to pick it up.
+need a `guise update` to pick it up — `doctor` fails on "guise-gh refuses to
+run gh without the identity's token" until they get one, by running the
+installed copy against a missing config with a stand-in `gh` on `PATH` and
+checking that `gh` never ran.
 
 ## Your own commits broke (signing errors, wrong email)
 
