@@ -2192,13 +2192,25 @@ chk_ids_differ() { [[ "$(cfg_get "identity.$1.appid")" != "$(cfg_get "identity.$
 # One authenticated call as the identity itself. Works for both kinds:
 # guise-token mints an installation token for apps and returns the PAT for
 # accounts. The credential goes through a config file on a pipe, never argv.
-api_as_identity() { # name path -> JSON on stdout
+curl_as_identity() { # name curl-args...
   local t
-  t=$("$BIN_DIR/guise-token" "$1") || return 1
-  curl -sf --config <(printf 'header = "Authorization: Bearer %s"\n' "$t") \
+  t=$("$BIN_DIR/guise-token" "$1") || return 1; shift
+  curl -s --config <(printf 'header = "Authorization: Bearer %s"\n' "$t") \
     -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "${GITHUB_API}$2"
+    -H "X-GitHub-Api-Version: 2022-11-28" "$@"
+}
+api_as_identity() { curl_as_identity "$1" -f "${GITHUB_API}$2"; } # name path -> JSON on stdout
+
+# A PAT for an account in a SAML SSO org works everywhere else until it is
+# authorized for that org: GitHub answers list calls without the org's repos
+# and 403s anything inside it, saying so only in a response header.
+chk_sso_authorized() {
+  local hdr rc=0
+  hdr=$(mktemp)
+  curl_as_identity "$1" -D "$hdr" "${GITHUB_API}/user/repos?per_page=1" >/dev/null || rc=1
+  ! grep -qi '^x-github-sso:' "$hdr" || rc=1
+  rm -f "$hdr"
+  return $rc
 }
 
 # The PAT still works AND still belongs to the account we recorded -- a swapped
@@ -2407,6 +2419,8 @@ cmd_doctor() {
             "add @$(cfg_get "identity.$name.login" || true) as a collaborator and accept the invite as that account, and check the token has the 'repo' scope (docs/troubleshooting.md)" chk_reaches_repo "$name"
       check "account email well-formed" \
             "re-run setup; email must be <userId>+<login>@users.noreply.github.com" chk_email_format "$name"
+      check "token authorized for every SAML SSO org" \
+            "as the agent account, open the token at github.com/settings/tokens and authorize it under 'Configure SSO'; a fine-grained token needs the org to approve it (docs/troubleshooting.md)" chk_sso_authorized "$name"
     else
       say "identity '$name' ($(cfg_get "identity.$name.slug") on $(cfg_get "identity.$name.owner")):"
       if [[ "$(key_source "$name")" == "file" ]]; then

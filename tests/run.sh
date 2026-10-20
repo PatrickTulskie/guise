@@ -328,6 +328,20 @@ expect "the failure names the token reachability check" \
 "$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes again once the PAT reaches a repo" "$?" "0"
 
+# A token nobody authorized for a SAML org still lists repos from everywhere
+# else, so the reachability check passes and only the response header says
+# that org is missing.
+FAKE_SSO=partial agent doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+expect_eq "doctor fails when a SAML org has not authorized the PAT" "$?" "1"
+expect "the failure names the SSO check" \
+  grep -q "FAIL  token authorized for every SAML SSO org" "$SB/doctor.out"
+expect "and its hint points at Configure SSO" grep -q "Configure SSO" "$SB/doctor.out"
+expect "while the repo reachability check still passes" \
+  grep -q "ok    token reaches at least one repository" "$SB/doctor.out"
+FAKE_SSO=required agent doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+expect "an SSO 403 fails the same check" \
+  grep -q "FAIL  token authorized for every SAML SSO org" "$SB/doctor.out"
+
 "$ROOT/bin/guise" setup --kind user </dev/null >/dev/null 2>&1
 expect_eq "re-run without --token-file reuses the stored token" "$?" "0"
 
