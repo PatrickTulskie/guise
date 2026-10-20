@@ -1,26 +1,40 @@
 #!/usr/bin/env bash
-# Fake GitHub API. Matches on the URL, logs every call to $CURL_LOG.
+# Fake GitHub API. Matches on the URL, logs every call to $CURL_LOG. An
+# endpoint that needs auth takes its Authorization header only through
+# --config (a file, or - for stdin); one anywhere in argv is the leak this
+# stub is here to catch, whatever the URL.
 set -euo pipefail
 
-url="" hdr="" prev=""
+url="" hdr="" config="" prev=""
 for a in "$@"; do
-  case "$prev" in -D) hdr="$a" ;; esac
+  case "$a" in *Authorization:*) echo "curl stub: an Authorization header in argv" >&2; exit 99 ;; esac
+  case "$prev" in -D) hdr="$a" ;; --config) config="$a" ;; esac
   case "$a" in https://*) url="$a" ;; esac
   prev="$a"
 done
 [[ -n "${CURL_LOG:-}" ]] && echo "$url" >> "$CURL_LOG"
 
+need_auth() {
+  if [[ "$config" == "-" ]]; then cat; elif [[ -n "$config" ]]; then cat "$config"; fi \
+    | grep -q '^header = "Authorization: Bearer ' \
+    || { echo "curl stub: $url needs its Authorization header through --config" >&2; exit 22; }
+}
+
 case "$url" in
   */app/installations/*/access_tokens)
+    need_auth
     printf '{"token":"ghs_stubtoken%s","expires_at":"2099-01-01T00:00:00Z"}' "$$"
     ;;
   */app/installations*)
+    need_auth
     printf '[{"id":%s,"account":{"login":"%s"}}]' "${FAKE_INSTALL_ID:?}" "${FAKE_OWNER:?}"
     ;;
   */app)
+    need_auth
     printf '{"id":%s,"slug":"%s"}' "${FAKE_APP_ID:?}" "${FAKE_SLUG:?}"
     ;;
   */user/repos*)
+    need_auth
     # FAKE_SSO names a SAML org the token isn't authorized for: "partial" drops
     # its repos from the list and says so in a header, "required" is the 403 a
     # resource inside that org answers with.
@@ -41,9 +55,11 @@ case "$url" in
     if [[ "${FAKE_REPO_COUNT:-1}" == "0" ]]; then printf '[]'; else printf '[{"id":9001}]'; fi
     ;;
   */installation/repositories*)
+    need_auth
     printf '{"total_count":%s,"repositories":[]}' "${FAKE_REPO_COUNT:-1}"
     ;;
   */user)
+    need_auth
     if [[ -n "$hdr" ]]; then
       printf 'HTTP/2 200\r\ngithub-authentication-token-expiration: %s\r\n\r\n' \
         "${FAKE_TOKEN_EXPIRES:-2099-01-01 00:00:00 UTC}" > "$hdr"

@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Fake 1Password CLI backed by files under $OP_FAKE_DIR/<vault>/<item>/<field>.
+# Fake 1Password CLI backed by files under $OP_FAKE_DIR/<vault>/<item>/<field>,
+# with a field's type under <item>/.type/<field>. Every call's argv goes to
+# $OP_ARGV_LOG, so a test can prove a secret never passed through it.
 set -euo pipefail
 
 dir="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
+[[ -z "${OP_ARGV_LOG:-}" ]] || printf '%s\n' "$*" >> "$OP_ARGV_LOG"
+
+[[ "${1:-}" != "--version" ]] || { echo "${OP_FAKE_VERSION:-2.30.0}"; exit 0; }
 
 # Set by tests that assert 1Password is never consulted (file-store installs,
 # and `update`, which must work against a locked vault).
@@ -43,31 +48,65 @@ case "$cmd" in
     ;;
   item)
     sub="${1:-}"; shift || true
-    title="" vault=""
+    title="" vault="" format="" reveal=""
     fields=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --vault) vault="$2"; shift 2 ;;
         --title) title="$2"; shift 2 ;;
         --category) shift 2 ;;
+        --format) format="$2"; shift 2 ;;
+        --reveal) reveal=1; shift ;;
         *=*) fields+=("$1"); shift ;;
         *) title="${title:-$1}"; shift ;;
       esac
     done
     vault="${vault:?op stub: --vault required}"
     title="${title:?op stub: item title required}"
+    item="$dir/$vault/$title"
+    field_type() { cat "$item/.type/$1" 2>/dev/null || echo TEXT; }
     case "$sub" in
       get)
-        [[ -d "$dir/$vault/$title" ]] || { echo "op stub: no item $title" >&2; exit 1; }
-        echo "{}"
+        [[ -d "$item" ]] || { echo "op stub: no item $title" >&2; exit 1; }
+        [[ "$format" == "json" ]] || { echo "{}"; exit 0; }
+        # One field per file. A concealed value only comes back with --reveal,
+        # which is what makes a template round trip keep it.
+        for f in "$item"/*; do
+          [[ -f "$f" ]] || continue
+          label=$(basename "$f"); type=$(field_type "$label")
+          if [[ "$type" == "CONCEALED" && -z "$reveal" ]]; then
+            jq -n --arg l "$label" '{id: $l, label: $l, type: "CONCEALED", value: "[concealed]"}'
+          else
+            jq -Rs --arg l "$label" --arg t "$type" '{id: $l, label: $l, type: $t, value: .}' "$f"
+          fi
+        done | jq -s --arg t "$title" --arg v "$vault" \
+          '{id: $t, title: $t, category: "API_CREDENTIAL", vault: {name: $v}, fields: .}'
         ;;
       create|edit)
-        [[ "$sub" == "edit" && ! -d "$dir/$vault/$title" ]] && { echo "op stub: edit of missing item" >&2; exit 1; }
-        mkdir -p "$dir/$vault/$title"
+        [[ "$sub" == "edit" && ! -d "$item" ]] && { echo "op stub: edit of missing item" >&2; exit 1; }
+        mkdir -p "$item/.type"
+        # A JSON template on stdin first, then assignments, which win -- as in
+        # the real one. Values are pulled out by index so none crosses argv.
+        template=""
+        [[ -t 0 ]] || template=$(cat)
+        if [[ -n "$template" ]]; then
+          n=$(printf '%s' "$template" | jq '.fields | length')
+          i=0
+          while (( i < n )); do
+            label=$(printf '%s' "$template" | jq -r --argjson i "$i" '.fields[$i].label // empty')
+            if [[ -n "$label" ]]; then
+              printf '%s' "$template" | jq -j --argjson i "$i" '.fields[$i].value // ""' > "$item/$label"
+              printf '%s' "$template" | jq -r --argjson i "$i" '.fields[$i].type // "TEXT"' > "$item/.type/$label"
+            fi
+            i=$((i + 1))
+          done
+        fi
         for f in ${fields+"${fields[@]}"}; do
           key="${f%%=*}"; val="${f#*=}"
+          type="${key##*\[}"; type="${type%\]}"; [[ "$type" != "$key" ]] || type=text
           key="${key%%\[*}"
-          printf '%s' "$val" > "$dir/$vault/$title/$key"
+          printf '%s' "$val" > "$item/$key"
+          printf '%s' "$type" | tr 'a-z' 'A-Z' > "$item/.type/$key"
         done
         echo "{}"
         ;;

@@ -130,8 +130,9 @@ context files up the directory tree pick it up for every repo underneath; it
 never overwrites your edits. It finishes by running `doctor`, which verifies
 the whole chain.
 
-Requires: `gh`, `jq`, and `git`, plus `op` (1Password CLI, signed in) if you
-use `--store op` or `--store op-cache`, and `op-cache` itself for the latter.
+Requires: `gh`, `jq`, and `git`, plus `op` (1Password CLI 2.30 or newer,
+signed in) if you use `--store op` or `--store op-cache`, and `op-cache` itself
+for the latter.
 
 An invite nobody accepted, or a token missing its scope, looks fine to every
 other check and only surfaces as a 403 at clone time, so `doctor` verifies the
@@ -151,7 +152,9 @@ accidentally commit it.
 
 Pass `--store op` to keep it in 1Password instead, read on demand. The secret
 never touches disk that way, but a locked vault blocks the agent until you
-unlock it.
+unlock it. Setup hands the secret to `op` as a JSON template on stdin rather
+than a command argument — `ps` shows arguments to every process you run — which
+needs `op` 2.30 or newer; an older one is refused before anything is written.
 
 `--store op-cache` is the middle ground, and experimental. The secret still
 lives in 1Password, but reads go through
