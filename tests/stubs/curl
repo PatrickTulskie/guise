@@ -21,6 +21,23 @@ case "$url" in
     printf '{"id":%s,"slug":"%s"}' "${FAKE_APP_ID:?}" "${FAKE_SLUG:?}"
     ;;
   */user/repos*)
+    # FAKE_SSO names a SAML org the token isn't authorized for: "partial" drops
+    # its repos from the list and says so in a header, "required" is the 403 a
+    # resource inside that org answers with.
+    status=200 sso=""
+    case "${FAKE_SSO:-}" in
+      partial)  sso='partial-results; organizations=21955855' ;;
+      required) sso='required; url=https://github.com/orgs/octo/sso?authorization_request=stub' status=403 ;;
+    esac
+    if [[ -n "$hdr" ]]; then
+      printf 'HTTP/2 %s\r\n' "$status" > "$hdr"
+      [[ -z "$sso" ]] || printf 'x-github-sso: %s\r\n' "$sso" >> "$hdr"
+      printf '\r\n' >> "$hdr"
+    fi
+    if [[ "$status" == 403 ]]; then
+      printf '{"message":"Resource protected by organization SAML enforcement."}'
+      exit 22
+    fi
     if [[ "${FAKE_REPO_COUNT:-1}" == "0" ]]; then printf '[]'; else printf '[{"id":9001}]'; fi
     ;;
   */installation/repositories*)

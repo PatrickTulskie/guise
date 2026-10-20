@@ -106,6 +106,11 @@ and GitHub offers an org there only when the account is a *member* — as an
 outside collaborator it can only scope a token to itself, which reaches
 nothing the org owns.
 
+An org that enforces SAML SSO also has to authorize the token (the token's
+page → **Configure SSO**; a fine-grained token waits on the org's approval
+instead). Until it does, the token silently reaches nothing that org owns —
+`doctor` reports it as "token authorized for every SAML SSO org".
+
 Then hand the token to setup as a file, never as a flag value (flags land in
 `ps` output and shell history):
 

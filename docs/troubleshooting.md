@@ -196,6 +196,29 @@ An empty array `[]` is the failure. For an app identity, ask
 means the app is installed but has no repositories selected, fixed under the
 installation's settings, "Only select repositories".
 
+## The token works but can't see an org's repos
+
+**Cause:** the org enforces SAML single sign-on, and the PAT was never
+authorized for it. GitHub doesn't reject such a token — it answers
+`/user/repos` without that org's repositories and 403s anything inside it,
+so clones fail while every other check, including "token reaches at least one
+repository", passes on the repos the token *can* see. The only signal is a
+response header, `X-GitHub-SSO`: `partial-results; organizations=<ids>` on a
+list, `required; url=...` alongside the 403. `doctor` fails on "token
+authorized for every SAML SSO org" whenever that header shows up. To see it
+yourself:
+
+```bash
+curl -s -D - -o /dev/null --config <(printf 'header = "Authorization: Bearer %s"\n' "$(guise token <identity>)") \
+  "https://api.github.com/user/repos?per_page=1" | grep -i x-github-sso
+```
+
+Fix: signed in as the agent account, open the token at
+github.com/settings/tokens and pick the org under **Configure SSO**. A
+fine-grained token is authorized when it is created instead, and the org has
+to approve it — until an owner does, it reaches nothing the org owns. Either
+way the stored token is unchanged; nothing in guise needs re-running.
+
 ## Setup refuses the token: "belongs to your own account"
 
 The PAT was issued while signed in as *you*, not as the agent account — which
