@@ -208,13 +208,23 @@ op_at_least() { # <major.minor> -> op is that version or newer
   (( major > ${1%%.*} || (major == ${1%%.*} && minor >= ${1#*.}) ))
 }
 
+# Which 1Password account an identity's reads go through. Inside setup, an
+# --op-account names the account the item being set up is in, which is how an
+# identity that never had one gets its reads back. Any other identity keeps
+# its own pin: a secret reused from it is wherever that identity reads from.
+op_account_for() { # name -> account, empty for op's default
+  local pinned
+  pinned=$(cfg_get "identity.$1.opaccount") || pinned=""
+  if [[ "$1" == "${name:-}" ]]; then printf '%s' "${op_account:-$pinned}"
+  else printf '%s' "${pinned:-${op_account:-}}"; fi
+}
+
+op_default_account() { op account get --format json 2>/dev/null | jq -r '.id // empty' || true; }
+
 op_read() { # name field -> the field's value on stdout
   local acct item reader
   item=$(cfg_get "identity.$1.opitem") || return 1
-  # Inside setup, an --op-account names the account the stored item is in,
-  # which is how an identity that never had one gets its reads back.
-  acct=${op_account:-}
-  [[ -n "$acct" ]] || acct=$(cfg_get "identity.$1.opaccount") || acct=""
+  acct=$(op_account_for "$1")
   reader=$(op_reader "$1")
   command -v "$reader" >/dev/null \
     || die "missing dependency: $reader -- identity '$1' reads its secret from 1Password through it"
@@ -1724,7 +1734,9 @@ cmd_setup() {
   done
 
   op_do() {
-    if [[ -n "$op_account" ]]; then op --account "$op_account" "$@"; else op "$@"; fi
+    local acct
+    acct=$(op_account_for "$name")
+    if [[ -n "$acct" ]]; then op --account "$acct" "$@"; else op "$@"; fi
   }
 
   # A bare `setup` on a terminal has nothing to go on, and dying at the first
@@ -1752,10 +1764,6 @@ cmd_setup() {
   # default when no name was given (which is the one it would derive anyway).
   local probe="$name"
   [[ -n "$probe" ]] || probe=$(default_identity)
-  # Every 1Password call below goes to the account the identity is pinned to,
-  # reads included -- not whichever one op happens to default to today. Only a
-  # named one: an unnamed run may turn out to be a new identity.
-  [[ -n "$op_account" || -z "$name" ]] || op_account=$(cfg_get "identity.$name.opaccount" || true)
 
   # Flags for one kind mean that kind, and re-running setup for an existing
   # identity keeps its kind; anything else is an account.
@@ -1985,9 +1993,8 @@ cmd_setup() {
       || die "missing dependency: op-cache (brew install PatrickTulskie/tap/op-cache, or use --store op)"
     # Unpinned, every read goes to whichever account op defaults to, and signing
     # in to a second account can change that answer out from under the item.
-    [[ -n "$op_account" ]] || op_account=$(cfg_get "identity.$name.opaccount" || true)
-    [[ -n "$op_account" ]] \
-      || op_account=$(op account get --format json 2>/dev/null | jq -r '.id // empty') || true
+    op_account=$(op_account_for "$name")
+    [[ -n "$op_account" ]] || op_account=$(op_default_account)
     # A re-run leaves the item where it is: only --vault or --op-item moves it.
     [[ -n "$op_item" || -n "$vault_given" ]] || op_item=$(cfg_get "identity.$name.opitem" || true)
     if [[ -n "$op_item" ]]; then

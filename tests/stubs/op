@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Fake 1Password CLI backed by files under $OP_FAKE_DIR/<vault>/<item>/<field>,
-# with a field's type under <item>/.type/<field>. Every call's argv goes to
+# with a field's type under <item>/.type/<field>. That is OP_FAKE_ACCOUNT's
+# tree; any other account's lives under $OP_FAKE_DIR/<account>/, and an account
+# with no such directory holds nothing. Every call's argv goes to
 # $OP_ARGV_LOG, so a test can prove a secret never passed through it.
 set -euo pipefail
 
-dir="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
+root="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
 [[ -z "${OP_ARGV_LOG:-}" ]] || printf '%s\n' "$*" >> "$OP_ARGV_LOG"
 
 [[ "${1:-}" != "--version" ]] || { echo "${OP_FAKE_VERSION:-2.30.0}"; exit 0; }
@@ -13,21 +15,19 @@ dir="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
 # and `update`, which must work against a locked vault).
 [[ -z "${OP_FAKE_FORBID:-}" ]] || { echo "op stub: called when it should not have been: $*" >&2; exit 1; }
 
-# OP_FAKE_DEFAULT is the account op falls back to with no --account. Any other
-# than OP_FAKE_ACCOUNT holds none of the items, like a work account signed in
-# next to the personal one.
-pinned=""
+# OP_FAKE_DEFAULT is the account op falls back to with no --account, like a
+# work account signed in next to the personal one.
+account="${OP_FAKE_DEFAULT:-${OP_FAKE_ACCOUNT:-}}"
 if [[ "${1:-}" == "--account" ]]; then
-  [[ -n "${OP_FAKE_ACCOUNT:-}" && "$2" == "$OP_FAKE_ACCOUNT" ]] \
-    || { echo "op stub: unexpected account: $2" >&2; exit 1; }
-  pinned=1
+  account="$2"
   shift 2
 fi
 
 cmd="${1:-}"; shift || true
-if [[ -z "$pinned" && "$cmd" != "account" && -n "${OP_FAKE_DEFAULT:-}" \
-      && "$OP_FAKE_DEFAULT" != "${OP_FAKE_ACCOUNT:-}" ]]; then
-  echo "op stub: nothing like that in $OP_FAKE_DEFAULT" >&2; exit 1
+dir="$root"
+if [[ "$cmd" != "account" && "$account" != "${OP_FAKE_ACCOUNT:-}" ]]; then
+  dir="$root/$account"
+  [[ -n "$account" && -d "$dir" ]] || { echo "op stub: nothing like that in $account" >&2; exit 1; }
 fi
 case "$cmd" in
   whoami)

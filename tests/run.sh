@@ -475,6 +475,29 @@ expect_eq "a new identity set up beside a pinned default exits 0" "$?" "0"
 expect_eq "and pins the account op answered for, not the default's" \
   "$(cfg identity.second-agent.opaccount)" "my.1password.com"
 
+# A second identity for an app reuses the first one's key, which is wherever
+# that identity reads from -- not in the account the new one is being pinned to.
+new_sandbox
+export OP_ARGV_LOG="$SB/op-argv.log"
+run_setup --store op --pem "$SB/key.pem" >/dev/null 2>&1
+mkdir -p "$OP_FAKE_DIR/work.1password.com"
+: > "$OP_ARGV_LOG"
+agent setup --name second --owner patricktulskie --app-id 1111 --store op --vault agents \
+  --op-account work.1password.com >/dev/null 2>&1
+expect_eq "a new identity in another account can reuse a key pinned elsewhere" "$?" "0"
+expect "reading it through the account the key's identity is pinned to" \
+  grep -qx -- "--account my.1password.com read op://Private/$APP_IDENT/private_key" "$OP_ARGV_LOG"
+expect_fail "and never through the new one" \
+  grep -q -- "--account work.1password.com read op://Private/$APP_IDENT" "$OP_ARGV_LOG"
+expect "its own item lands in the account it asked for" \
+  cmp -s "$OP_FAKE_DIR/work.1password.com/agents/$APP_IDENT/private_key" "$OP_FAKE_DIR/Private/$APP_IDENT/private_key"
+expect_eq "which it is pinned to" "$(cfg identity.second.opaccount)" "work.1password.com"
+expect_eq "while the first keeps its own pin" "$(cfg identity.$APP_IDENT.opaccount)" "my.1password.com"
+expect "and its item where it was" test ! -e "$OP_FAKE_DIR/work.1password.com/Private"
+OP_FAKE_DEFAULT=other.1password.com agent doctor --name second >/dev/null 2>&1
+expect_eq "and the new identity reads through its pin" "$?" "0"
+unset OP_ARGV_LOG
+
 # --- user identity guardrails ------------------------------------------------
 echo "user identity guardrails:"
 printf 'github_pat_other\n' > "$SB/pat2.txt"
