@@ -6,7 +6,7 @@
 #
 # Subcommands: setup | doctor | triage | uninstall | clone | use | token
 #              update | default | rename | cp | rm | basedir | which | list
-#              warm-cache
+#              warm-cache | setup-hooks
 #
 # Self-contained: the helper binaries, git config template, commit hook, and
 # hook dispatcher are embedded below and written out by `setup`. Targets
@@ -673,19 +673,21 @@ set -euo pipefail
 hook=${0##*/}
 own="{{HOOKS_DIR}}/$hook"
 
-# The common directory, so a linked worktree finds the hooks of the repository
-# it belongs to. Relative to the top of the working tree, which is where git
-# runs hooks from and how it reads a relative core.hooksPath. `git init` fires
-# reference-transaction before there is a repository to find, and a failure
-# here would abort the init, so no repository means no repository hooks.
-inner=""
-if common=$(git rev-parse --git-common-dir 2>/dev/null); then
+# The hooks path `guise setup-hooks` displaced, when the repository pins one
+# of its own; otherwise the common .git/hooks, so a linked worktree finds the
+# hooks of the repository it belongs to. Relative to the top of the working
+# tree, which is where git runs hooks from and how it reads a relative
+# core.hooksPath. `git init` fires reference-transaction before there is a
+# repository to find, and a failure here would abort the init, so no
+# repository means no repository hooks.
+inner=$(git config --type=path --get guise.innerhookspath 2>/dev/null || true)
+if [[ -z "$inner" ]] && common=$(git rev-parse --git-common-dir 2>/dev/null); then
   inner="$common/hooks"
-  case "$inner" in
-    /*) ;;
-    *)  inner="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/$inner" ;;
-  esac
 fi
+case "$inner" in
+  ""|/*) ;;
+  *)     inner="$(git rev-parse --show-toplevel 2>/dev/null || pwd)/$inner" ;;
+esac
 
 # Repository first: a prepare-commit-msg that writes the message wholesale
 # would wipe a trailer added ahead of it. -ef keeps a hooks directory that is
@@ -2446,6 +2448,10 @@ chk_hook() { [[ -x "$HOOKS_DIR/prepare-commit-msg" ]]; }
 chk_dispatcher() { local h; for h in $GIT_HOOKS; do [[ -x "$DISPATCH_DIR/$h" ]] || return 1; done; }
 _chk_hookspath() { [[ "$(git -C "$REPO" config --get core.hooksPath)" == "$DISPATCH_DIR" ]]; }
 chk_hookspath() { with_scoped_repo "$1" _chk_hookspath; }
+# The repository doctor runs in, when an identity owns it: a path the repo pins
+# itself wins over the conf, so this reads what git resolves, not the conf.
+chk_repo_hookspath() { [[ "$(git config --get core.hooksPath 2>/dev/null || true)" == "$DISPATCH_DIR" ]]; }
+in_agent_repo() { git rev-parse --show-toplevel >/dev/null 2>&1 && identity_from_cwd >/dev/null 2>&1; }
 
 chk_shell_hook() {
   local rc
@@ -2622,6 +2628,11 @@ cmd_doctor() {
         "the installed guise-gh falls back to YOUR gh login when the token fails -- run 'guise update' to reinstall it" chk_gh_fails_closed
   check "default identity is in config" \
         "'$(cfg_get core.defaultidentity || true)' is no longer an identity -- pick one with 'guise default <name>' (have: $(list_identities | tr '\n' ' '))" chk_default_exists
+  if in_agent_repo; then
+    check "this repository runs its hooks through guise" \
+          "run 'guise setup-hooks' here, and again after anything that resets the repo's core.hooksPath, such as a dependency install that re-applies its hook setup" \
+          chk_repo_hookspath
+  fi
 
   local names name
   names=$(list_identities)
@@ -2894,6 +2905,7 @@ cmd_uninstall() {
   # on the agent account, and only that account's owner can take it down.
   for name in $(list_identities); do
     if signing_enabled "$name"; then signed=1; fi
+    restore_repo_hooks "$name"
   done
 
   remove_include_block
@@ -2930,6 +2942,57 @@ cmd_uninstall() {
     [[ -z "$b" ]] || say "  - $b and any clones in it"
   done
   say "your own git identity was never modified and is unchanged"
+}
+
+# ---------------------------------------------------------------------------
+# setup-hooks -- a repository that pins core.hooksPath of its own
+# ---------------------------------------------------------------------------
+
+# A repo-local core.hooksPath wins over the rendered conf's, so in a repository
+# whose hook manager keeps its hooks in a tracked directory and pins that path,
+# guise's hook never runs and the agent's commits lose the co-author trailer.
+# Recording the pinned path and pointing the repository at the dispatcher keeps
+# both sets of hooks running. Nothing tracked is touched, and a repository with
+# no path of its own needs nothing: .git/hooks already runs through the conf.
+setup_repo_hooks() { # repo dir
+  local current
+  current=$(git -C "$1" config --local --get core.hooksPath 2>/dev/null || true)
+  [[ -n "$current" && "$current" != "$DISPATCH_DIR" ]] || return 0
+  git -C "$1" config --local guise.innerhookspath "$current"
+  git -C "$1" config --local core.hooksPath "$DISPATCH_DIR"
+  say "hooks in $current now run through guise, ahead of its own"
+}
+
+# Undo for every clone of an identity whose wiring is going away. Left as it
+# is, such a clone would point at a dispatcher that no longer exists, and git
+# would silently run no hooks at all.
+restore_repo_hooks() { # name
+  local dir inner
+  [[ -d "$(identity_dir "$1")" ]] || return 0
+  identity_clones "$1" | while read -r dir; do
+    [[ "$(git -C "$dir" config --local --get core.hooksPath 2>/dev/null || true)" == "$DISPATCH_DIR" ]] || continue
+    if inner=$(git -C "$dir" config --local --get guise.innerhookspath 2>/dev/null); then
+      git -C "$dir" config --local core.hooksPath "$inner"
+      git -C "$dir" config --local --unset guise.innerhookspath
+    else
+      git -C "$dir" config --local --unset core.hooksPath
+    fi
+    say "handed $dir its own hooks path back"
+  done
+}
+
+cmd_setup_hooks() {
+  [[ $# -eq 0 ]] || die "setup-hooks takes no arguments"
+  [[ -f "$CONFIG_FILE" ]] || die "no config at $CONFIG_FILE -- run 'guise setup' first"
+  local top name before inner
+  top=$(git rev-parse --show-toplevel 2>/dev/null) || die "setup-hooks: not inside a git repository"
+  name=$(identity_from_cwd) \
+    || die "$PWD belongs to no identity -- setup-hooks is for agent clones under $(basedir)/<identity>/"
+  before=$(git config --local --get core.hooksPath 2>/dev/null || true)
+  setup_repo_hooks "$top"
+  [[ "$before" != "$(git config --local --get core.hooksPath 2>/dev/null || true)" ]] && return 0
+  inner=$(git config --local --get guise.innerhookspath 2>/dev/null) || inner=".git/hooks"
+  say "nothing to do: hooks in $inner already run first, then guise's (identity '$name')"
 }
 
 # ---------------------------------------------------------------------------
@@ -2973,6 +3036,7 @@ cmd_clone() {
   [[ -e "$dest" ]] && die "$dest already exists"
   say "cloning into $dest (identity '$name' applies here)"
   git clone "$url" "$dest"
+  setup_repo_hooks "$dest"
   say "done -- work in $dest; use 'guise-gh' instead of 'gh' for PRs"
 }
 
@@ -3646,6 +3710,7 @@ cmd_rm() {
   local in_op=""; if op_backed "$(key_source "$name")"; then in_op=1; fi
   [[ "$(default_identity)" != "$name" ]] || was_default=1
 
+  [[ -n "$code" ]] || restore_repo_hooks "$name"
   git config -f "$CONFIG_FILE" --remove-section "identity.$name"
   # Recorded before any cleanup that can fail, so a shred that aborts the run
   # does not also drop the clones out of doctor's view.
@@ -3765,6 +3830,10 @@ usage: guise <command> [flags]
              the shell hook is loaded, otherwise opens a subshell
   update     reinstall the helpers, hook, and rendered confs from this copy
              of the script; no credential read, no network, config untouched
+  setup-hooks
+             inside an agent clone that pins core.hooksPath of its own: run
+             those hooks ahead of guise's instead of in place of it; re-run
+             after the repo's tooling resets that path
   token      print the identity's token  [identity]
   default    show the identity used when none is named, or set it  [<name>]
   rename     rename an identity, its directory, and its key files
@@ -3798,6 +3867,7 @@ case "${1:-}" in
   clone)      shift; cmd_clone "$@" ;;
   use)        shift; cmd_use "$@" ;;
   update)     shift; cmd_update "$@" ;;
+  setup-hooks) shift; cmd_setup_hooks "$@" ;;
   token)      shift; cmd_token "$@" ;;
   default)    shift; cmd_default "$@" ;;
   rename)     shift; cmd_rename "$@" ;;

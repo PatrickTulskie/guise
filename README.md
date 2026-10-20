@@ -364,6 +364,23 @@ belong to. Outside an identity's directory the dispatcher adds nothing: a clone
 that `rm` left behind still runs its own hooks and puts no trailer on your
 commits.
 
+A repository that pins `core.hooksPath` in its own config — hook managers that
+keep hooks in a tracked directory, husky among them, set exactly this — wins
+over the rendered conf, so guise's hook never runs there and the trailer goes
+missing. Inside such a clone, once:
+
+```bash
+guise setup-hooks
+```
+
+It records the repository's own path and points the repository at the
+dispatcher, which runs the recorded hooks ahead of its own. Nothing tracked is
+touched. Managers of that kind tend to set the path again on every dependency
+install or bootstrap; `guise doctor` run inside the clone says when that has
+happened, and `guise setup-hooks` again picks up the new value. `guise clone`
+runs it for you, and `uninstall` — or `rm`, for the clones it keeps — hands
+each repository its own path back.
+
 ## Commands
 
 | Command | What it does |
@@ -374,6 +391,7 @@ commits.
 | `guise clone <owner/repo>` | clone where the identity applies |
 | `guise use [name]` | cd to an identity's directory; the default one if you don't say |
 | `guise update` | reinstall helpers, hook, and rendered confs from this copy of the script |
+| `guise setup-hooks` | in a clone that pins its own `core.hooksPath`: run those hooks ahead of guise's instead of in place of it |
 | `guise token` | print the identity's token (debugging / harness use) |
 | `guise default [name]` | show or change the identity used when none is named |
 | `guise rename <old> <new>` | rename an identity, its directory, and its key files |

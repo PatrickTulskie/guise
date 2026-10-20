@@ -80,6 +80,32 @@ git pull && ./bin/guise update
 Credit that a replayed commit already carries is left as it is — the hook only
 adds your trailer to commits the identity actually authored.
 
+## The co-author trailer is missing from agent commits
+
+**Cause:** the repository pins a hooks directory of its own. Check, inside the
+clone:
+
+```bash
+git config --local --get core.hooksPath
+```
+
+Anything there other than `~/.config/guise/git/hooks` wins over the identity's
+conf, so guise's hook never runs. Hook managers that keep hooks in a tracked
+directory (husky, for one) set this, and set it again on every install — which
+is how the trailer vanishes from a clone that used to have it. Inside the clone:
+
+```bash
+guise setup-hooks
+```
+
+It records that path, points the repository at guise's dispatcher, and the
+dispatcher runs the recorded hooks ahead of its own. `guise doctor` run inside
+the clone reports the state as "this repository runs its hooks through guise".
+
+If the value is unset or already the dispatcher, the trailer went missing for
+another reason: a replay (cherry-pick, revert, rebase, `--author`) gets none on
+purpose, and an old hook may be installed — `guise update`.
+
 ## The repo's pre-commit hooks don't run in agent scope
 
 **Cause:** an identity conf rendered before the dispatcher existed. Git runs
