@@ -21,8 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
-    # macOS covers bash 3.2, BSD tools, and the osxkeychain helper the rendered
-    # git config has to override. Linux covers the GNU tool variants that
+    # macOS covers BSD tools and the osxkeychain helper the rendered git
+    # config has to override. Linux covers the GNU tool variants that
     # cloud-hosted coding agents run on. Git Bash takes 25 minutes a run, so it
     # lives in windows.yml on a schedule instead of here.
     runs-on: ${{ matrix.os }}
@@ -36,16 +36,25 @@ jobs:
         with:
           persist-credentials: false
 
-      # The suite needs git, openssl, jq, and ssh-keygen; op, curl, and gh are
-      # stubbed by the harness. Logged so a runner image that moves bash out
-      # from under bash 3.2 shows up here instead of as a mystery failure.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # The suite builds guise, then needs git, openssl, jq, and ssh-keygen;
+      # op, curl, and gh are stubbed by the harness. Logged so a runner image
+      # that moves a tool out from under the suite shows up here instead of as
+      # a mystery failure.
       - name: Record the environment under test
         run: |
+          go version
           bash --version | head -1
           git --version
           openssl version
           jq --version
           ssh -V
+
+      - name: make vet
+        run: make vet
 
       - name: tests/run.sh
         run: bash tests/run.sh
@@ -62,14 +71,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # The distro's Go is older than go.mod asks for; it fetches the toolchain
+      # go.mod names on first use, which is the one the build then runs with.
       - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
         with:
           distribution: Ubuntu-24.04
-          additional-packages: git jq openssl openssh-client
+          additional-packages: git jq openssl openssh-client golang-go ca-certificates
 
       - name: Record the environment under test
         shell: wsl-bash {0}
         run: |
+          go version
           bash --version | head -1
           git --version
           openssl version

@@ -10,7 +10,13 @@ set -euo pipefail
 ROOT=/work
 SB="$HOME/sandbox"
 
-export PATH="$ROOT/tests/stubs:$ROOT/bin:$HOME/.local/bin:$PATH"
+# A build of the working tree, kept out of /work so a Linux binary never
+# lands in a host's bin/. `guise-rebuild` picks up an edit made on the host.
+export GUISE="$HOME/guise-build/guise"
+mkdir -p "$(dirname "$GUISE")"
+go build -o "$GUISE" "$ROOT/cmd/guise"
+
+export PATH="$ROOT/tests/stubs:$(dirname "$GUISE"):$HOME/.local/bin:$PATH"
 export XDG_CACHE_HOME="$HOME/.cache"
 export SHELL="${SHELL:-/bin/bash}"
 
@@ -44,7 +50,8 @@ if [[ -t 1 ]]; then
 guise sandbox -- host $(uname -n), throwaway \$HOME, fake GitHub and 1Password.
 Nothing here reaches the network and nothing survives the container.
 
-  guise            /work/bin/guise, straight off your working tree
+  guise            built from /work when this shell started; guise-rebuild
+                   after an edit on the host
   app identity     --owner PatrickTulskie --app-id 1111 --pem ~/sandbox/app-key.pem
   user identity    --login patrick-agent, and any string as the token
   1Password        vault "Private", stored as files under ~/sandbox/op

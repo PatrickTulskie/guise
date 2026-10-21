@@ -1,2 +1,6 @@
 *
 !docker/entrypoint.sh
+!docker/rebuild.sh
+!go.mod
+!go.sum
+!cmd/
