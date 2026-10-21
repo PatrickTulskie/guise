@@ -81,6 +81,9 @@ expect_eq "so it reads" "$?" "0"
 
 # --- user identity guardrails ------------------------------------------------
 echo "user identity guardrails:"
+new_sandbox
+new_token_file "$SB/pat.txt"
+run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
 printf 'github_pat_other\n' > "$SB/pat2.txt"
 FAKE_GH_LOGIN=patrick-agent "$ROOT/bin/guise" setup --kind user --name mine \
   --token-file "$SB/pat2.txt" </dev/null >/dev/null 2>&1
@@ -92,6 +95,7 @@ expect_eq "refuses a token that isn't the --login account" "$?" "1"
 "$ROOT/bin/guise" setup --kind user --name mine --app-id 1111 </dev/null >/dev/null 2>&1
 expect_eq "rejects app-only flags on a user identity" "$?" "1"
 git config -f "$HOME/.config/guise/config" identity.$USER_IDENT.tokenexpires "2000-01-01 00:00:00 UTC"
-"$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
+"$ROOT/bin/guise" doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
 expect_eq "doctor fails on a PAT inside its last 30 days" "$?" "1"
+expect "on the expiry check" grep -q "FAIL  token not expiring within 30 days" "$SB/doctor.out"
 

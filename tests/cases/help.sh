@@ -5,8 +5,9 @@
 echo "help:"
 new_sandbox
 help_err=$("$ROOT/bin/guise" help 2>&1 >/dev/null </dev/null)
+help_rc=$?
 expect_eq "help writes nothing to stderr" "$help_err" ""
-expect_eq "help exits 0" "$?" "0"
+expect_eq "help exits 0" "$help_rc" "0"
 expect "help still lists the commands" \
   bash -c "'$ROOT/bin/guise' help 2>/dev/null | grep -q '^  setup'"
 expect "and help provisions nothing" test ! -e "$HOME/.config/guise/config"

@@ -35,7 +35,10 @@ expect_eq "and follows the default when it moves" \
 
 # Nothing configured and more than one identity: there is no right guess.
 git config -f "$HOME/.config/guise/config" --unset core.defaultidentity
-expect_fail "use refuses to guess with no default and several identities" agent use
+rm -f "$SB/use.pwd"
+expect_fail "use refuses to guess with no default and several identities" \
+  env SHELL="$SB/recording-shell" "$ROOT/bin/guise" use
+expect "and starts no shell" test ! -e "$SB/use.pwd"
 agent default "$APP_IDENT" >/dev/null
 
 expect_fail "use refuses an unknown identity" agent use nonesuch
