@@ -83,7 +83,7 @@ expect_eq "and commits made after an update still verify" \
 echo '# stale' >> "$HOME/.local/bin/guise"
 agent update >/dev/null 2>&1
 expect "the installed script is replaced by the one being run" \
-  cmp -s "$ROOT/bin/guise" "$HOME/.local/bin/guise"
+  cmp -s "$GUISE" "$HOME/.local/bin/guise"
 snap_up=$(snapshot)
 agent update >/dev/null 2>&1
 expect_eq "a second update changes nothing" "$(snapshot)" "$snap_up"

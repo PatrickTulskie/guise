@@ -31,7 +31,7 @@ expect_eq "guise-gh resolves against GUISE_CONFIG, not the home config" \
       "$HOME/.local/bin/guise-gh" echo-token)" "github_pat_two"
 expect_eq "and guise which answers from it too" \
   "$(cd "$HOME/altroot/agent-two" && GUISE_CONFIG="$SB/alt-config" \
-      "$ROOT/bin/guise" which)" "agent-two"
+      "$GUISE" which)" "agent-two"
 
 expect_eq "GUISE_IDENTITY still overrides the directory" \
   "$(cd "$HOME/agentic-code/agent-one" && GUISE_IDENTITY=agent-two "$HOME/.local/bin/guise-gh" echo-token)" \

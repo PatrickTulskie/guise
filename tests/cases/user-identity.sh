@@ -2,7 +2,7 @@
 echo "user account identity:"
 new_sandbox
 printf 'github_pat_stub123\n' > "$SB/pat.txt"
-"$ROOT/bin/guise" setup --store op --token-file "$SB/pat.txt" \
+"$GUISE" setup --store op --token-file "$SB/pat.txt" \
   --op-account my.1password.com </dev/null >/dev/null 2>&1
 expect_eq "setup with no app flags sets up an account" "$?" "0"
 expect_eq "kind recorded" "$(cfg identity.$USER_IDENT.kind)" "user"
@@ -22,14 +22,14 @@ expect_eq "account identity applies inside scope" \
   "$(git -C "$repo" config --get user.email)" "4444+patrick-agent@users.noreply.github.com"
 expect_eq "commits are authored by the account, not a bot" \
   "$(git -C "$repo" config --get user.name)" "patrick-agent"
-"$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
+"$GUISE" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes for a user identity" "$?" "0"
 
-FAKE_REPO_COUNT=0 "$ROOT/bin/guise" doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
+FAKE_REPO_COUNT=0 "$GUISE" doctor --name "$USER_IDENT" > "$SB/doctor.out" 2>&1
 expect_eq "doctor fails when the PAT reaches no repos" "$?" "1"
 expect "the failure names the token reachability check" \
   grep -q "FAIL  token reaches at least one repository" "$SB/doctor.out"
-"$ROOT/bin/guise" doctor --name "$USER_IDENT" >/dev/null 2>&1
+"$GUISE" doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes again once the PAT reaches a repo" "$?" "0"
 
 # A token nobody authorized for a SAML org still lists repos from everywhere
@@ -60,7 +60,7 @@ rm "$XDG_CACHE_HOME/guise/$USER_IDENT.token.json"
 agent doctor --name "$USER_IDENT" >/dev/null 2>&1
 expect_eq "doctor passes once the cache file is gone" "$?" "0"
 
-"$ROOT/bin/guise" setup --kind user </dev/null >/dev/null 2>&1
+"$GUISE" setup --kind user </dev/null >/dev/null 2>&1
 expect_eq "re-run without --token-file reuses the stored token" "$?" "0"
 
 # App and user identities have to coexist: they share basedir and ~/.gitconfig.
@@ -68,6 +68,6 @@ run_setup --store op --name bot --pem "$SB/key.pem" >/dev/null 2>&1
 expect_eq "app identity alongside a user identity" "$?" "0"
 expect_eq "both identities in the owned gitconfig" \
   "$(grep -c includeIf "$HOME/.config/guise/gitconfig")" "2"
-"$ROOT/bin/guise" doctor >/dev/null 2>&1
+"$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor passes with both kinds present" "$?" "0"
 

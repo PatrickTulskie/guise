@@ -4,6 +4,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The copy under test. Every case runs this one, so a build elsewhere is one
+# variable away from the suite.
+GUISE="${GUISE:-$ROOT/bin/guise}"
 REAL_PATH="$PATH"
 PASS=0; FAIL=0
 
@@ -52,16 +55,16 @@ new_sandbox() {
 
 # No --coauthor: the hook's fallback to global user.name/email is under test.
 run_setup() {
-  "$ROOT/bin/guise" setup --owner patricktulskie --app-id 1111 \
+  "$GUISE" setup --owner patricktulskie --app-id 1111 \
     --op-account my.1password.com "$@" </dev/null
 }
 
 run_setup_user() {
-  "$ROOT/bin/guise" setup --kind user \
+  "$GUISE" setup --kind user \
     --op-account my.1password.com "$@" </dev/null
 }
 
-agent() { "$ROOT/bin/guise" "$@" </dev/null; }
+agent() { "$GUISE" "$@" </dev/null; }
 
 new_token_file() { printf 'github_pat_stub123\n' > "$1"; }
 

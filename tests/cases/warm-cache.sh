@@ -46,7 +46,7 @@ expect_eq "--name warms only the one it names" \
 # A login item runs this unattended, so a vault it can't reach has to be an
 # exit code and not a cheerful zero.
 rm -rf "$OP_CACHE_FAKE_DIR"
-OP_FAKE_FORBID=1 "$ROOT/bin/guise" warm-cache </dev/null >/dev/null 2>&1
+OP_FAKE_FORBID=1 "$GUISE" warm-cache </dev/null >/dev/null 2>&1
 expect_eq "an unreachable vault fails the command" "$?" "1"
 
 new_sandbox

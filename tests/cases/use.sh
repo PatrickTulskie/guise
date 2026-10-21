@@ -13,7 +13,7 @@ printf '%s\n' "\${GUISE_IDENTITY:-}" > "$SB/use.identity"
 EOF
 chmod +x "$SB/recording-shell"
 
-SHELL="$SB/recording-shell" "$ROOT/bin/guise" use platform </dev/null >/dev/null 2>&1
+SHELL="$SB/recording-shell" "$GUISE" use platform </dev/null >/dev/null 2>&1
 expect_eq "use lands in the named identity's directory" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
 # Nothing is exported: the directory is what carries the identity, so there is
@@ -21,7 +21,7 @@ expect_eq "use lands in the named identity's directory" \
 expect_eq "and exports nothing to go stale" "$(cat "$SB/use.identity")" ""
 
 rm -f "$SB/use.pwd"
-SHELL="$SB/recording-shell" "$ROOT/bin/guise" use </dev/null >/dev/null 2>&1
+SHELL="$SB/recording-shell" "$GUISE" use </dev/null >/dev/null 2>&1
 expect_eq "no name lands in the default identity's directory" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/$APP_IDENT"
 
@@ -29,7 +29,7 @@ expect_eq "no name lands in the default identity's directory" \
 # the config apart from any first-identity fallback.
 rm -f "$SB/use.pwd"
 agent default platform >/dev/null
-SHELL="$SB/recording-shell" "$ROOT/bin/guise" use </dev/null >/dev/null 2>&1
+SHELL="$SB/recording-shell" "$GUISE" use </dev/null >/dev/null 2>&1
 expect_eq "and follows the default when it moves" \
   "$(cat "$SB/use.pwd")" "$HOME/agentic-code/platform"
 
@@ -37,7 +37,7 @@ expect_eq "and follows the default when it moves" \
 git config -f "$HOME/.config/guise/config" --unset core.defaultidentity
 rm -f "$SB/use.pwd"
 expect_fail "use refuses to guess with no default and several identities" \
-  env SHELL="$SB/recording-shell" "$ROOT/bin/guise" use
+  env SHELL="$SB/recording-shell" "$GUISE" use
 expect "and starts no shell" test ! -e "$SB/use.pwd"
 agent default "$APP_IDENT" >/dev/null
 
@@ -75,7 +75,7 @@ fi
 # in every one of them.
 quoted_base="$HOME/pat's ünïcode guise"
 git config -f "$HOME/.config/guise/config" core.basedir "$quoted_base"
-emitted=$(/bin/bash "$ROOT/bin/guise" use platform --emit-shell </dev/null)
+emitted=$(/bin/bash "$GUISE" use platform --emit-shell </dev/null)
 expect_eq "a quote in the path survives the eval the hook does" \
   "$(cd "$HOME" && eval "$emitted" 2>/dev/null; printf %s "$PWD")" \
   "$quoted_base/platform"

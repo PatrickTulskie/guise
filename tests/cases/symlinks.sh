@@ -35,7 +35,7 @@ expect "and the replacement is the real source line" \
   grep -qF 'hook.sh' "$HOME/dotfiles/zshrc"
 expect "through the symlink, which is still a symlink" test -L "$HOME/.zshrc"
 
-"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
+"$GUISE" uninstall --yes >/dev/null 2>&1
 expect "uninstall leaves ~/.zshrc a symlink" test -L "$HOME/.zshrc"
 expect "uninstall leaves ~/.gitconfig a symlink" test -L "$HOME/.gitconfig"
 expect "rc target byte-identical to pre-setup" \
