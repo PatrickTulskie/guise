@@ -26,7 +26,7 @@ ln -s "$app_dir" "$SB/alias"
 git config -f "$HOME/.config/guise/config" "identity.$USER_IDENT.basedir" "$SB/alias"
 expect_fail "or reaches through a symlink" agent rm "$APP_IDENT" --code
 git config -f "$HOME/.config/guise/config" --unset "identity.$USER_IDENT.basedir"
-printf 'n\nn\nn\nn\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --wizard > "$SB/rm.declined" 2>&1
+printf 'n\nn\nn\nn\n' | "$GUISE" rm "$USER_IDENT" --wizard > "$SB/rm.declined" 2>&1
 expect_eq "declining the wizard's last question exits 1" "$?" "1"
 expect "after warning about a commit only a detached HEAD holds" \
   grep -q "isn't pushed anywhere" "$SB/rm.declined"
@@ -37,7 +37,7 @@ expect "or deleted anything" test -d "$app_dir" -a -d "$user_dir/someclone"
 # the token. In a workspace of its own, so its root goes when the identity does.
 agent basedir "$HOME/special" --name "$USER_IDENT" >/dev/null 2>&1
 user_dir="$HOME/special/$USER_IDENT"
-printf 'n\ny\nn\ny\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --wizard >/dev/null 2>&1
+printf 'n\ny\nn\ny\n' | "$GUISE" rm "$USER_IDENT" --wizard >/dev/null 2>&1
 expect_eq "the wizard removes an identity" "$?" "0"
 expect_eq "its config section is gone" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
 expect "its rendered conf is gone" test ! -e "$HOME/.config/guise/git/$USER_IDENT.conf"
@@ -77,14 +77,14 @@ expect "and says which public key to take off the account" grep -q "ssh-ed25519 
 # in 1Password, which is not guise's to delete.
 new_token_file "$SB/pat.txt"
 run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
-printf '%s\ny\ny\n' "$APP_IDENT" | "$ROOT/bin/guise" rm --wizard >/dev/null 2>&1
+printf '%s\ny\ny\n' "$APP_IDENT" | "$GUISE" rm --wizard >/dev/null 2>&1
 expect_eq "the wizard removes an identity picked from its menu" "$?" "0"
 expect "deleting its directory when told to" test ! -e "$app_dir"
 expect "the 1Password item is left alone" test -f "$OP_FAKE_DIR/Private/test-agent/private_key"
 expect_eq "the default moves to the only identity left" "$(cfg core.defaultidentity)" "$USER_IDENT"
 
 # --keep answers every question but the last one, so one "y" is the whole run.
-printf 'y\n' | "$ROOT/bin/guise" rm "$USER_IDENT" --keep --wizard >/dev/null 2>&1
+printf 'y\n' | "$GUISE" rm "$USER_IDENT" --keep --wizard >/dev/null 2>&1
 expect_eq "rm --keep exits 0" "$?" "0"
 expect_eq "the last identity can go too" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
 expect "--keep leaves the token" test -f "$keys/$USER_IDENT.token"

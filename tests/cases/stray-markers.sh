@@ -32,7 +32,7 @@ expect "and the line is still there afterwards" \
   grep -qxF 'echo "# >>> guise >>>"' "$HOME/.zshrc"
 expect_eq "with exactly one real block added below it" \
   "$(grep -cxF '# >>> guise >>>' "$HOME/.zshrc")" "1"
-"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
+"$GUISE" uninstall --yes >/dev/null 2>&1
 expect_eq "and uninstall takes the block, not the quoted line" \
   "$(cat "$HOME/.zshrc")" "$(printf 'echo "# >>> guise >>>"\nalias ll="ls -l"')"
 
@@ -42,7 +42,7 @@ new_sandbox
 printf 'alias ll="ls -l"' > "$HOME/.zshrc"
 cp "$HOME/.zshrc" "$SB/zshrc.pre"
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
-"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
+"$GUISE" uninstall --yes >/dev/null 2>&1
 expect "an rc with no trailing newline comes back byte-identical" \
   cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"
 

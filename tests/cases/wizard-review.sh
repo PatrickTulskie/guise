@@ -1,7 +1,7 @@
 # --- guided setup: reviewing an app identity, and 1Password through the prompts
 # The review an app identity gets: owner, App ID, new key, store, summary.
 echo "guided setup, reviewing:"
-wizard() { "$ROOT/bin/guise" setup --wizard; }
+wizard() { "$GUISE" setup --wizard; }
 
 new_sandbox
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
@@ -30,7 +30,7 @@ unset FAKE_GH_LOGIN
 # --wizard alongside flags asks only for what the flags did not answer, so the
 # two ways of driving setup compose instead of one overriding the other.
 new_sandbox
-printf 'y\nok\n\n\ny\n' | "$ROOT/bin/guise" setup --wizard \
+printf 'y\nok\n\n\ny\n' | "$GUISE" setup --wizard \
   --kind app --owner patricktulskie --app-id 1111 --pem "$SB/key.pem" \
   --store file >/dev/null 2>&1
 expect_eq "--wizard with flags exits 0" "$?" "0"
@@ -58,7 +58,7 @@ expect_eq "and entering through keeps it" "$(snapshot)" "$snap_cache"
 mkdir -p "$OP_FAKE_DIR/work.1password.com/Private"
 cp -R "$OP_FAKE_DIR/Private/$USER_IDENT" "$OP_FAKE_DIR/work.1password.com/Private/"
 printf '%s\n\n\n\n\n\n' "$USER_IDENT" \
-  | "$ROOT/bin/guise" setup --wizard --op-account work.1password.com >/dev/null 2>&1
+  | "$GUISE" setup --wizard --op-account work.1password.com >/dev/null 2>&1
 expect_eq "reviewing with --op-account exits 0" "$?" "0"
 expect_eq "and re-pins the identity to that account" \
   "$(cfg identity.$USER_IDENT.opaccount)" "work.1password.com"

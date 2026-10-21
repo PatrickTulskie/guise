@@ -6,7 +6,7 @@ echo "guided setup:"
 
 # kind, app-exists, owner, app id, where the key is, pem, browser pause, store,
 # name, workspace, go
-wizard() { "$ROOT/bin/guise" setup --wizard; }
+wizard() { "$GUISE" setup --wizard; }
 
 new_sandbox
 printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \

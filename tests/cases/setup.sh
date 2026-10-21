@@ -30,9 +30,9 @@ snap1=$(snapshot)
 echo "custom rules" > "$HOME/agentic-code/AGENTS.md"
 run_setup >/dev/null 2>&1
 expect_eq "re-run without --pem exits 0" "$?" "0"
-"$ROOT/bin/guise" setup --name "$APP_IDENT" </dev/null >/dev/null 2>&1
+"$GUISE" setup --name "$APP_IDENT" </dev/null >/dev/null 2>&1
 expect_eq "a re-run by name alone finds the app's owner and App ID" "$?" "0"
-"$ROOT/bin/guise" setup </dev/null >/dev/null 2>&1
+"$GUISE" setup </dev/null >/dev/null 2>&1
 expect_eq "and so does a bare re-run of the default" "$?" "0"
 expect_eq "re-run changes no artifact" "$(snapshot)" "$snap1"
 expect_eq "still exactly one marker block" \
@@ -159,16 +159,16 @@ expect_eq "only one mint against the API" "$(grep -c access_tokens "$CURL_LOG")"
 
 # --- doctor ------------------------------------------------------------------
 echo "doctor:"
-"$ROOT/bin/guise" doctor >/dev/null 2>&1
+"$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor passes on a healthy install" "$?" "0"
 
 # A valid credential that reaches zero repos passes every other check and only
 # fails at clone time -- doctor has to catch it.
-FAKE_REPO_COUNT=0 "$ROOT/bin/guise" doctor > "$SB/doctor.out" 2>&1
+FAKE_REPO_COUNT=0 "$GUISE" doctor > "$SB/doctor.out" 2>&1
 expect_eq "doctor fails when the installation reaches no repos" "$?" "1"
 expect "the failure names the installation reachability check" \
   grep -q "FAIL  installation reaches at least one repository" "$SB/doctor.out"
-"$ROOT/bin/guise" doctor >/dev/null 2>&1
+"$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor passes again once the installation has a repo" "$?" "0"
 
 # A guise-gh from before it checked the token puts guise-token's failure in an

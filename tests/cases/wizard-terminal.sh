@@ -5,7 +5,7 @@ echo "guided setup, terminals:"
 new_sandbox
 if have_pty; then
   printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\n\n\n\nn\n' "$SB/key.pem" \
-    | TERM=dumb in_pty "'$ROOT/bin/guise' setup" > "$SB/dumb.out" 2>&1
+    | TERM=dumb in_pty "'$GUISE' setup" > "$SB/dumb.out" 2>&1
   grep -q "Look good?" "$SB/dumb.out" || sed 's/^/    | /' "$SB/dumb.out"
   expect "a bare setup on a dumb terminal still runs the wizard" \
     grep -q "Look good?" "$SB/dumb.out"

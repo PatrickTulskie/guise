@@ -107,7 +107,7 @@ expect_eq "which resolves the identity from the overridden path" \
 expect_eq "and the other identity from the shared one" \
   "$(cd "$HOME/src/$APP_IDENT/someclone" && agent which)" "$APP_IDENT"
 expect_fail "which fails outside every identity directory" \
-  env -u GUISE_IDENTITY bash -c "cd \"$HOME\" && \"$ROOT/bin/guise\" which"
+  env -u GUISE_IDENTITY bash -c "cd \"$HOME\" && \"$GUISE\" which"
 agent doctor >/dev/null 2>&1
 expect_eq "doctor passes with two workspaces" "$?" "0"
 expect_fail "basedir refuses --unset without --name" agent basedir --unset

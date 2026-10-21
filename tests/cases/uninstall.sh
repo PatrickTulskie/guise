@@ -5,7 +5,7 @@ printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
 cp "$HOME/.gitconfig" "$SB/gitconfig.pre"
 cp "$HOME/.zshrc" "$SB/zshrc.pre"
 run_setup --store op --pem "$SB/key.pem" >/dev/null 2>&1
-"$ROOT/bin/guise" uninstall --yes >/dev/null 2>&1
+"$GUISE" uninstall --yes >/dev/null 2>&1
 expect_eq "uninstall exits 0" "$?" "0"
 expect "~/.gitconfig byte-identical to pre-setup" cmp -s "$HOME/.gitconfig" "$SB/gitconfig.pre"
 expect "~/.zshrc byte-identical to pre-setup" cmp -s "$HOME/.zshrc" "$SB/zshrc.pre"

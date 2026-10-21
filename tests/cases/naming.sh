@@ -6,7 +6,7 @@ expect_eq "identity is named after the app slug" "$(cfg identity.test-agent.slug
 expect "directory is named after the agent" test -d "$HOME/agentic-code/test-agent"
 expect "no 'default' directory is created" test ! -e "$HOME/agentic-code/default"
 expect_eq "first identity becomes the default" "$(cfg core.defaultidentity)" "test-agent"
-expect_eq "'default' subcommand reports it" "$("$ROOT/bin/guise" default)" "test-agent"
+expect_eq "'default' subcommand reports it" "$("$GUISE" default)" "test-agent"
 expect_eq "token with no identity resolves the default" \
   "$("$HOME/.local/bin/guise-token")" "$("$HOME/.local/bin/guise-token" test-agent)"
 
@@ -14,12 +14,12 @@ openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
 run_setup --store file --name explicit --pem "$SB/key2.pem" >/dev/null 2>&1
 expect "--name still wins over the derived name" test -d "$HOME/agentic-code/explicit"
 expect_eq "a later identity does not steal the default" "$(cfg core.defaultidentity)" "test-agent"
-"$ROOT/bin/guise" default explicit >/dev/null 2>&1
+"$GUISE" default explicit >/dev/null 2>&1
 expect_eq "default can be repointed" "$(cfg core.defaultidentity)" "explicit"
 openssl genrsa -out "$SB/key3.pem" 2048 2>/dev/null
 run_setup --store file --name claimed --pem "$SB/key3.pem" --default >/dev/null 2>&1
 expect_eq "--default claims the default identity" "$(cfg core.defaultidentity)" "claimed"
-"$ROOT/bin/guise" default nonesuch >/dev/null 2>&1
+"$GUISE" default nonesuch >/dev/null 2>&1
 expect_eq "default rejects an unknown identity" "$?" "1"
 
 # The config file is plain text, so the default can still end up naming nothing;
@@ -37,9 +37,9 @@ expect_eq "doctor passes once the default is repointed" "$?" "0"
 
 # --- rename -------------------------------------------------------------------
 echo "rename:"
-"$ROOT/bin/guise" default test-agent >/dev/null 2>&1
+"$GUISE" default test-agent >/dev/null 2>&1
 mkdir -p "$HOME/agentic-code/test-agent/someclone"
-"$ROOT/bin/guise" rename test-agent renamed >/dev/null 2>&1
+"$GUISE" rename test-agent renamed >/dev/null 2>&1
 expect_eq "rename exits 0" "$?" "0"
 expect "clones move with the identity" test -d "$HOME/agentic-code/renamed/someclone"
 expect "old directory is gone" test ! -e "$HOME/agentic-code/test-agent"
@@ -55,10 +55,10 @@ git init -q "$HOME/agentic-code/renamed/newrepo"
 expect_eq "identity applies under the new directory" \
   "$(git -C "$HOME/agentic-code/renamed/newrepo" config --get user.email)" \
   "3333+test-agent[bot]@users.noreply.github.com"
-"$ROOT/bin/guise" doctor >/dev/null 2>&1
+"$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor passes after rename" "$?" "0"
-"$ROOT/bin/guise" rename renamed explicit >/dev/null 2>&1
+"$GUISE" rename renamed explicit >/dev/null 2>&1
 expect_eq "rename refuses a name already in use" "$?" "1"
-"$ROOT/bin/guise" rename nonesuch whatever >/dev/null 2>&1
+"$GUISE" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
 

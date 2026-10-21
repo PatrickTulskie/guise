@@ -28,7 +28,7 @@ prompt=$(cd "$trepo" && agent triage --print)
 expect "the prompt names the identity owning where triage started" \
   grep -qF "$trepo, identity '$APP_IDENT''s directory" <<<"$prompt"
 expect "and points the agent at the source it is running" \
-  grep -qxF "     $ROOT/bin/guise" <<<"$prompt"
+  grep -qxF "     $GUISE" <<<"$prompt"
 expect "and at the docs that ship with it" \
   grep -qxF "     $ROOT/docs/troubleshooting.md" <<<"$prompt"
 expect_eq "with no terminal, a bare triage prints the prompt rather than launching" \
@@ -52,11 +52,11 @@ expect "so is one that isn't installed" \
 # On a terminal it asks which harness; enter takes the first one found.
 if have_pty; then
   rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
-  printf '\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$ROOT/bin/guise' triage" > "$SB/triage.out" 2>&1
+  printf '\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$GUISE' triage" > "$SB/triage.out" 2>&1
   expect "on a terminal, triage offers the harnesses it found" grep -q "Claude Code" "$SB/triage.out"
   expect_eq "and launches the one picked" "$(cat "$SB/harness/claude.arg1" 2>/dev/null)" "$prompt"
   rm -f "$SB"/harness/*.arg* "$SB"/harness/*.cwd
-  printf 'print\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$ROOT/bin/guise' triage" > "$SB/triage.out" 2>&1
+  printf 'print\n' | PATH="$SB/harness:$PATH" TERM=dumb in_pty "cd '$trepo' && '$GUISE' triage" > "$SB/triage.out" 2>&1
   expect "or prints the prompt when asked to" grep -q "You're helping someone" "$SB/triage.out"
   expect "without launching anything" test ! -e "$SB/harness/claude.cwd"
 else
