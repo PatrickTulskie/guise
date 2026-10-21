@@ -1,6 +1,6 @@
 name: Windows
 
-# Git Bash runs the suite in about 25 minutes -- every process is a fork, and a
+# Git Bash runs the suite in 15 to 25 minutes -- every process is a fork, and a
 # fork costs an order of magnitude more on Windows -- so it is a weekly canary
 # and a button, not a gate on every PR. Run it by hand before merging a change
 # to path handling, the credential plumbing, or the harness itself.
