@@ -7,6 +7,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The copy under test. Every case runs this one, so a build elsewhere is one
 # variable away from the suite.
 GUISE="${GUISE:-$ROOT/bin/guise}"
+# What the installed binary is called: guise.exe on Windows, where the build
+# and the install both carry the suffix.
+case "$(uname -s)" in MINGW*|MSYS*) EXE=.exe ;; *) EXE= ;; esac
 REAL_PATH="$PATH"
 PASS=0; FAIL=0
 

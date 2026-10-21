@@ -16,6 +16,13 @@ if [[ "${1:-}" == --case ]]; then
   exit 0
 fi
 
+# The suite runs a binary it builds itself, so the cases always test the
+# source as it stands. GUISE points the build somewhere else, which is how the
+# container keeps a Linux build out of a host's bin/.
+case "$(uname -s)" in MINGW*|MSYS*) exe=.exe ;; *) exe= ;; esac
+export GUISE="${GUISE:-$HERE/../bin/guise$exe}"
+go build -o "$GUISE" "$HERE/../cmd/guise" || exit 2
+
 JOBS=${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}
 OUT=$(mktemp -d); export OUT
 cd "$HERE/cases"
