@@ -71,17 +71,28 @@ jobs:
         with:
           persist-credentials: false
 
-      # The distro's Go is older than go.mod asks for; it fetches the toolchain
-      # go.mod names on first use, which is the one the build then runs with.
+      # Built on the Windows side for Linux: installing Go inside the distro
+      # takes longer than the suite does, and the suite runs whatever binary
+      # it finds at bin/guise when it has no toolchain of its own.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Cross-compile guise for the distro
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: go build -o bin/guise ./cmd/guise
+
       - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
         with:
           distribution: Ubuntu-24.04
-          additional-packages: git jq openssl openssh-client golang-go ca-certificates
+          additional-packages: git jq openssl openssh-client
 
       - name: Record the environment under test
         shell: wsl-bash {0}
         run: |
-          go version
           bash --version | head -1
           git --version
           openssl version
