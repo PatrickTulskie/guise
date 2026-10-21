@@ -19,8 +19,9 @@ concurrency:
 jobs:
   git-bash:
     name: windows-latest (Git Bash)
-    # Git Bash is MSYS2: git, curl and openssl are native programs that see
-    # Windows paths and no /dev/fd, and chmod does nothing.
+    # Git Bash is MSYS2: guise, git and curl are native programs that see
+    # Windows paths, the shims and the suite are MSYS scripts that see POSIX
+    # ones, and chmod does nothing.
     runs-on: windows-latest
     timeout-minutes: 40
     defaults:
@@ -36,6 +37,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
       # The runner's %TEMP% is spelled with an 8.3 short name (RUNNER~1), and
       # git expands a directory to its long name before matching includeIf, so
       # no gitdir pattern built under a sandbox there would ever match. A real
@@ -45,6 +50,7 @@ jobs:
 
       - name: Record the environment under test
         run: |
+          go version
           bash --version | head -1
           git --version
           openssl version
