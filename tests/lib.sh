@@ -72,6 +72,11 @@ cfg() {
   v=$(git config -f "$HOME/.config/guise/config" --get "$1") || return 1
   case "$v" in [A-Za-z]:/*) cygpath -u "$v" ;; *) printf '%s\n' "$v" ;; esac
 }
+cfg_all() {
+  git config -f "$HOME/.config/guise/config" --get-all "$1" | while read -r v; do
+    case "$v" in [A-Za-z]:/*) cygpath -u "$v" ;; *) printf '%s\n' "$v" ;; esac
+  done
+}
 # And the other way round, for a path the suite wrote and git will read back.
 git_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
 

@@ -135,10 +135,18 @@ git_path() {
   if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi
 }
 
+# ~-form for a path shown to the user; PATH entries stay in the shell's spelling
+tilde_path() {
+  case "$1" in
+    "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
+    *)         printf '%s' "$1" ;;
+  esac
+}
+
 # ~-form for values written into git config files
 display_path() {
   case "$1" in
-    "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;;
+    "$HOME"/*) tilde_path "$1" ;;
     *)         git_path "$1" ;;
   esac
 }
@@ -2590,7 +2598,7 @@ helpers_hint() {
     esac
     [[ "$found" -ef "$BIN_DIR/$b" ]] || {
       printf '%s shadows %s -- remove it, or put %s ahead of %s on PATH' \
-        "$found" "$BIN_DIR/$b" "$(display_path "$BIN_DIR")" "$(display_path "${found%/*}")"
+        "$found" "$BIN_DIR/$b" "$(tilde_path "$BIN_DIR")" "$(tilde_path "${found%/*}")"
       return 0
     }
   done

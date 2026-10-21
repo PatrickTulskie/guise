@@ -70,7 +70,7 @@ expect "both halves of the signing key" \
   test ! -e "$keys/$USER_IDENT.signing" -a ! -e "$keys/$USER_IDENT.signing.pub"
 expect "and the clones" test ! -e "$user_dir"
 expect_eq "so only the directory the wizard kept stays on doctor's list" \
-  "$(git config -f "$HOME/.config/guise/config" --get-all core.strandeddir)" "$HOME/special/$USER_IDENT"
+  "$(cfg_all core.strandeddir)" "$HOME/special/$USER_IDENT"
 expect "and says which public key to take off the account" grep -q "ssh-ed25519 " "$SB/rm.out"
 
 # Picked from the wizard's menu this time. It is the default, and its secret is
@@ -115,11 +115,11 @@ fi
 new_token_file "$SB/pat.txt"
 run_setup_user --store file --token-file "$SB/pat.txt" >/dev/null 2>&1
 rm -rf "$HOME/agentic-code/$USER_IDENT"
-stranded_before=$(git config -f "$HOME/.config/guise/config" --get-all core.strandeddir)
+stranded_before=$(cfg_all core.strandeddir)
 agent rm "$USER_IDENT" --force > "$SB/rm.gone" 2>&1
 expect_eq "rm --force removes an identity whose directory is already gone" "$?" "0"
 expect_eq "config section and all" "$(cfg "identity.$USER_IDENT.login" 2>/dev/null)" ""
 expect "taking the token with it" test ! -e "$keys/$USER_IDENT.token"
 expect_eq "without adding the missing directory to doctor's list" \
-  "$(git config -f "$HOME/.config/guise/config" --get-all core.strandeddir)" "$stranded_before"
+  "$(cfg_all core.strandeddir)" "$stranded_before"
 
