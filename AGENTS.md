@@ -77,7 +77,7 @@ Green is the merge gate; CI runs exactly this on every PR, on macOS, on
 Linux, and on Windows inside WSL: macOS is the bash 3.2 and BSD floor
 described below, Linux is the GNU tooling cloud-hosted agents run on, and WSL
 is Linux with the checkout on the Windows disk. Git Bash, the MSYS environment
-described further down, takes 25 minutes a run, so it is a weekly workflow
+described further down, takes 15 to 25 minutes a run, so it is a weekly workflow
 and a button (Actions → Windows → Run workflow): press it before merging a
 change to path handling, the credential plumbing, or the harness.
 
