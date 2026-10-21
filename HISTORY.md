@@ -1,3 +1,9 @@
+## 0.6.1
+
+### Fixed
+
+* On Git Bash, `doctor`'s hint for a shadowed helper names its directories as `~/...` instead of `C:/Users/...` (#44)
+
 ## 0.6.0
 
 ### Added

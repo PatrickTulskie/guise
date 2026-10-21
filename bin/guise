@@ -16,7 +16,7 @@ set -euo pipefail
 
 SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
-VERSION="0.6.0"
+VERSION="0.6.1"
 
 CONFIG_DIR="$HOME/.config/guise"
 # The embedded helpers have always read GUISE_CONFIG, and `guise which` now
