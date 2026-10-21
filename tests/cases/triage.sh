@@ -28,7 +28,7 @@ prompt=$(cd "$trepo" && agent triage --print)
 expect "the prompt names the identity owning where triage started" \
   grep -qF "$trepo, identity '$APP_IDENT''s directory" <<<"$prompt"
 expect "and points the agent at the source it is running" \
-  grep -qxF "     $GUISE" <<<"$prompt"
+  grep -qxF "     $ROOT/cmd/guise" <<<"$prompt"
 expect "and at the docs that ship with it" \
   grep -qxF "     $ROOT/docs/troubleshooting.md" <<<"$prompt"
 expect_eq "with no terminal, a bare triage prints the prompt rather than launching" \

@@ -68,14 +68,12 @@ else
 fi
 
 # The hook evals what --emit-shell printed, so an apostrophe anywhere in the
-# path has to survive the round trip rather than ending the quoted word.
-# Emitted by /bin/bash on purpose: bash 3.2 is the floor this script targets,
-# and its pattern substitution is where the escaping goes wrong. The eval that
-# checks the result can run under any bash -- a mangled quote is a syntax error
-# in every one of them.
+# path has to survive the round trip rather than ending the quoted word. The
+# eval that checks the result can run under any bash -- a mangled quote is a
+# syntax error in every one of them.
 quoted_base="$HOME/pat's ünïcode guise"
 git config -f "$HOME/.config/guise/config" core.basedir "$quoted_base"
-emitted=$(/bin/bash "$GUISE" use platform --emit-shell </dev/null)
+emitted=$(agent use platform --emit-shell)
 expect_eq "a quote in the path survives the eval the hook does" \
   "$(cd "$HOME" && eval "$emitted" 2>/dev/null; printf %s "$PWD")" \
   "$quoted_base/platform"

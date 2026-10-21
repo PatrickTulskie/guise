@@ -80,10 +80,10 @@ expect_eq "and commits made after an update still verify" \
   "$(git -C "$uprepo" log -1 --format='%G?')" "G"
 
 # The installed copy is the thing being updated, so prove it actually moves.
-echo '# stale' >> "$HOME/.local/bin/guise"
+echo '# stale' >> "$HOME/.local/bin/guise$EXE"
 agent update >/dev/null 2>&1
-expect "the installed script is replaced by the one being run" \
-  cmp -s "$GUISE" "$HOME/.local/bin/guise"
+expect "the installed binary is replaced by the one being run" \
+  cmp -s "$GUISE" "$HOME/.local/bin/guise$EXE"
 snap_up=$(snapshot)
 agent update >/dev/null 2>&1
 expect_eq "a second update changes nothing" "$(snapshot)" "$snap_up"
