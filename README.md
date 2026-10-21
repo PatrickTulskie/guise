@@ -10,13 +10,18 @@ reviewing and pushing it. An agent identity lets you move quicker while still
 leaving an honest trail. This framework sets that up alongside your regular
 git configuration, without disturbing it.
 
-If you're a human, you don't have to read the rest of this README. Clone the
-repo and run setup with no arguments — it asks for what it needs, walks you
+If you're a human, you don't have to read the rest of this README. Install
+guise and run setup with no arguments — it asks for what it needs, walks you
 through the GitHub-side steps that have to happen in a browser, and waits:
 
 ```bash
-./bin/guise setup
+git clone https://github.com/PatrickTulskie/guise && cd guise && make install
+guise setup
 ```
+
+`make install` builds a single binary with Go and puts it in `~/.local/bin`.
+No Go? Every [release](https://github.com/PatrickTulskie/guise/releases) ships
+one per platform: unpack it, put `guise` on your `PATH`, and run `guise setup`.
 
 Or hand the repo to your harness of choice and tell it to set up your machine.
 Either way you need the GitHub side first — an account or app for the agent,
@@ -26,7 +31,7 @@ you.
 Know the flags already? Pass them and the questions don't happen:
 
 ```bash
-./bin/guise setup --login your-agent-account
+guise setup --login your-agent-account
 ```
 
 `setup` prompts for the PAT — there is deliberately no `--token` flag, since
@@ -77,8 +82,8 @@ by default — the better fit for open source — or a
 **[GitHub App bot](#a-github-app-bot-instead)**. Both kinds can coexist, one per
 subdirectory.
 
-The tool is tested on macOS, Linux, and Windows (Git Bash and WSL), and stays
-compatible with the bash 3.2 that ships with macOS.
+The tool is one Go binary, tested on macOS, Linux, and Windows (Git Bash and
+WSL).
 
 ## Setting up a separate GitHub account
 
@@ -116,7 +121,7 @@ Then hand the token to setup as a file, never as a flag value (flags land in
 
 ```bash
 pbpaste > /tmp/pat
-./bin/guise setup --token-file /tmp/pat
+guise setup --token-file /tmp/pat
 ```
 
 Setup calls `GET /user` to discover the account's login and numeric user ID,
@@ -131,7 +136,7 @@ context files up the directory tree pick it up for every repo underneath; it
 never overwrites your edits. It finishes by running `doctor`, which verifies
 the whole chain.
 
-Requires: `gh`, `jq`, and `git`, plus `op` (1Password CLI 2.30 or newer,
+Requires: `gh`, `git` and `curl`, plus `op` (1Password CLI 2.30 or newer,
 signed in) if you use `--store op` or `--store op-cache`, and `op-cache` itself
 for the latter.
 
@@ -238,15 +243,15 @@ Apps → mode Always), or the first push will be rejected.
 ### Setup
 
 ```bash
-./bin/guise setup --owner patricktulskie --app-id 12345 --pem ~/Downloads/your-app.pem
+guise setup --owner patricktulskie --app-id 12345 --pem ~/Downloads/your-app.pem
 ```
 
 What happens: the App's metadata (slug, installation ID, bot user ID) is
 discovered from the API, the private key is stored, the PEM is shredded, and a
 directory-scoped git identity is wired up for
 `~/agentic-code/patricktulskie-agent/` — named after the agent itself, not a
-generic slot. The rest matches an account setup, plus `openssl` on top of its
-requirements. Safe to re-run any time.
+generic slot. The rest matches an account setup, with the same requirements.
+Safe to re-run any time.
 
 ### The PEM is only needed once per app
 
@@ -355,7 +360,7 @@ instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
 
 Git runs exactly one hooks directory per repository, and inside an identity's
 directory that is guise's: the rendered conf points `core.hooksPath` at a
-dispatcher, one small script per hook git knows. Each runs the repository's
+dispatcher, one small shim per hook git knows. Each runs the repository's
 own hook of that name first — from `.git/hooks`, so the pre-commit framework,
 lefthook, overcommit and hand-written hooks keep running on agent commits, and
 a failing one still refuses the commit — and then guise's, which adds your
@@ -390,7 +395,7 @@ each repository its own path back.
 | `guise triage` | start a session in your coding harness to work out what's wrong |
 | `guise clone <owner/repo>` | clone where the identity applies |
 | `guise use [name]` | cd to an identity's directory; the default one if you don't say |
-| `guise update` | reinstall helpers, hook, and rendered confs from this copy of the script |
+| `guise update` | reinstall helpers, hook, and rendered confs from this copy of guise |
 | `guise setup-hooks` | in a clone that pins its own `core.hooksPath`: run those hooks ahead of guise's instead of in place of it |
 | `guise token` | print the identity's token (debugging / harness use) |
 | `guise default [name]` | show or change the identity used when none is named |
@@ -402,7 +407,7 @@ each repository its own path back.
 | `guise list` | print every identity, its account, store, and workspace |
 | `guise warm-cache` | read every op-cache-backed secret once, so no agent meets the 1Password prompt |
 | `guise uninstall` | remove all wiring; keys (1Password or file) and clones are left alone |
-| `guise version` | print the version of this copy of the script (`--version`, `-v`) |
+| `guise version` | print the version of this copy of guise (`--version`, `-v`) |
 
 ## Identity names and the default
 
@@ -562,25 +567,27 @@ guise clone someone/their-repo --name oss     # → ~/agentic-code/oss/
 
 ## Picking up a new version
 
-The helper binaries, the commit hook, and the git config template live inside
-`bin/guise` and are written out at install time, so a newer script in this
-repo does nothing until you install it:
+The helpers, the commit hook, and the git config template are written out of
+the `guise` binary at install time, so a newer build does nothing until you
+tell it to install itself:
 
 ```bash
-git pull && ./bin/guise update
+git pull && make && ./bin/guise update      # from a checkout
+guise update                                # from a release binary you put on PATH
 ```
 
-`update` rewrites the helpers, the hook, and **every** identity's rendered conf
-from the script you ran it with. It reads no credential, makes no API call, and
-does not touch `~/.config/guise/config` or anything stored in 1Password — so
-it works with the vault locked and the network down. Follow it with
-`guise doctor` when you want the whole chain verified.
+`update` copies the binary it runs from into `~/.local/bin` and rewrites the
+helpers, the hook, and **every** identity's rendered conf from it. It reads no
+credential, makes no API call, and does not touch `~/.config/guise/config` or
+anything stored in 1Password — so it works with the vault locked and the
+network down. Follow it with `guise doctor` when you want the whole chain
+verified.
 
 Re-running `setup` also picks up a new version, but it does more than an update
 needs: it reads the identity's stored secret and calls GitHub to rediscover
 metadata, and it re-renders only the identity it ran for. Use `setup` when the
-credential or the GitHub-side metadata changed; use `update` when only the
-script did.
+credential or the GitHub-side metadata changed; use `update` when only guise
+did.
 
 ## Contributing to repos the app isn't installed on
 
@@ -604,9 +611,10 @@ docker compose run --rm shell     # then: guise setup
 ```
 
 Inside, `$HOME` is disposable, GitHub and 1Password are fakes, and `guise` is
-the copy in your working tree — so the guided setup, `doctor`, `rename` and
-even `uninstall` all run end to end with nothing real at stake. The container
-tells you the account and App ID to answer with when it starts.
+built from your working tree as the shell starts (`guise-rebuild` after an
+edit) — so the guided setup, `doctor`, `rename` and even `uninstall` all run
+end to end with nothing real at stake. The container tells you the account and
+App ID to answer with when it starts.
 
 ## Windows
 
@@ -614,19 +622,16 @@ guise runs in Git Bash — the shell Git for Windows installs — and in WSL. Se
 it up from the shell whose `git` makes the commits; that is the one rule, and
 the two don't share a config, so a machine that uses both gets set up in both.
 
-**Git Bash.** Everything hangs off includes in `~/.gitconfig`, which is
-`%USERPROFILE%\.gitconfig` here, so the Windows `git` your editor runs reads
-it too. Paths in the rendered config are written in Windows form, since git,
-ssh-keygen and curl are native programs that can't follow `/c/Users/...`.
-Two things differ from macOS and Linux:
-
-- `chmod` does nothing on NTFS, so `doctor` doesn't check for mode 600 there
-  and says so. What keeps `~/.config/guise/keys/` private is the ACL on your
-  profile directory, which only you (and administrators) can read.
-- An App identity signs its JWT with the `openssl` Git for Windows ships at
-  `/usr/bin/openssl`. The native one ahead of it on PATH can't read a key
-  handed over on a pipe, and a pipe is the only way the key travels — never a
-  temp file, never an argument. Keep Git for Windows's own `usr/bin` on PATH.
+**Git Bash.** `guise` is a native Windows program, so everything it writes is
+in Windows form: the includes in `~/.gitconfig`, which is
+`%USERPROFILE%\.gitconfig` here and so is read by the Windows `git` your
+editor runs too, and the paths in the rendered config. The helpers and hooks
+it installs are `sh` shims, which git runs through its own `sh`, so they want
+Git Bash on the machine even when you call `guise.exe` from somewhere else.
+One thing differs from macOS and Linux: `chmod` does nothing on NTFS, so
+`doctor` doesn't check for mode 600 there and says so. What keeps
+`~/.config/guise/keys/` private is the ACL on your profile directory, which
+only you (and administrators) can read.
 
 **WSL.** It's Linux, so install `git`, `gh` and — if you use it — `op` inside
 the distro and run `setup` there. The trap is which `git` is running. An
