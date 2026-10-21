@@ -43,6 +43,13 @@ jobs:
       - name: Put the sandboxes under a long path name
         run: echo "TMPDIR=$(cygpath -m "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
+      # Defender's real-time scan sits on every process the suite starts, and the
+      # suite is tens of thousands of them. The runner is discarded after the
+      # job and runs nothing but this checkout, so turn it off for the run.
+      - name: Turn off Defender real-time scanning
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Record the environment under test
         run: |
           bash --version | head -1
