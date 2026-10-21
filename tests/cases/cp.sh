@@ -11,7 +11,7 @@ keys="$HOME/.config/guise/keys"
 awk '{print $1" "$2}' "$keys/$USER_IDENT.signing.pub" >> "$SIGNING_KEYS_FILE"
 agent basedir "$HOME/special" --name "$USER_IDENT" >/dev/null 2>&1
 user_dir="$HOME/special/$USER_IDENT"
-cp_snap() { cat "$HOME/.config/guise/config" "$HOME/.config/guise/gitconfig" | shasum; }
+cp_snap() { cat "$HOME/.config/guise/config" "$HOME/.config/guise/gitconfig" | digest; }
 gh_token_in() { (cd "$1" && "$HOME/.local/bin/guise-gh" echo-token); }
 before=$(cp_snap)
 
