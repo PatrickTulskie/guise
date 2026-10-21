@@ -53,10 +53,10 @@ The current hook clears the harness trailers by address — the harnesses' own,
 and the identity's, which the commit is already authored by — then adds yours.
 Any other co-author is left standing, so a trailer that credits a contributor
 whose work you reimplemented survives. It is written out at install time, so a
-newer script does nothing on its own:
+newer guise does nothing on its own:
 
 ```bash
-git pull && ./bin/guise update
+git pull && make && ./bin/guise update
 ```
 
 `doctor`'s "co-author hook installed and executable" check proves a hook is
@@ -74,7 +74,7 @@ The current hook stands down on a replay: a cherry-pick, a revert, a rebase, or
 a `--author` that isn't the identity's own address. Update to get it:
 
 ```bash
-git pull && ./bin/guise update
+git pull && make && ./bin/guise update
 ```
 
 Credit that a replayed commit already carries is left as it is — the hook only
@@ -116,7 +116,7 @@ linters, no secret scanners. The current conf names a dispatcher that runs the
 repository's hook first, then guise's. Update to get it:
 
 ```bash
-git pull && ./bin/guise update
+git pull && make && ./bin/guise update
 ```
 
 `doctor` covers this as "hook dispatcher installed" and "agent scope runs hooks
@@ -430,7 +430,7 @@ If it still doesn't take:
 - On macOS, bash reads `~/.bash_profile` rather than `~/.bashrc`, which is where
   setup puts it.
 - `command guise` must resolve — the hook defines a function that shadows
-  `guise` and delegates to the real script, so `~/.local/bin` has to be on
+  `guise` and delegates to the real binary, so `~/.local/bin` has to be on
   `PATH`.
 
 ## Setup or uninstall stops: "has a stray guise marker"
@@ -527,23 +527,13 @@ Put a wrapper on `PATH` instead:
 printf '#!/bin/sh\nexec op.exe "$@"\n' > ~/.local/bin/op && chmod +x ~/.local/bin/op
 ```
 
-## Git Bash: "no openssl here can read a key handed over on a pipe"
-
-**Cause:** an App identity's key reaches `openssl` on a pipe, never as a file
-or an argument, and the native `openssl` first on PATH in Git Bash can't open
-a pipe. guise falls back to the MSYS build Git for Windows ships at
-`/usr/bin/openssl`, and this means it didn't find it — a trimmed `PATH`, or a
-`bash` that isn't Git for Windows's own.
-
-Run from Git Bash itself, or put `C:\Program Files\Git\usr\bin` on `PATH`.
-Under WSL every `openssl` reads pipes, so that works too.
-
-## WSL: `bin/guise: line 5: $'\r': command not found`
+## The suite stops: `tests/run.sh: line 7: $'\r': command not found`
 
 **Cause:** the clone was made by Windows `git` with `core.autocrlf` on, which
-turned the scripts' line endings into CRLF, and a Linux bash then reads the
-`\r` as part of each line. The repo pins LF through `.gitattributes`, so a
-clone made from a version that has it is immune.
+turned the suite's scripts into CRLF, and a bash then reads the `\r` as part
+of each line. guise itself is a binary and doesn't care, but the suite and
+the stubs are shell. The repo pins LF through `.gitattributes`, so a clone
+made from a version that has it is immune.
 
 Re-clone, or from inside the clone:
 
