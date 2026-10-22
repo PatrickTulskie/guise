@@ -647,13 +647,7 @@ func cmdUse(args []string) {
 	}
 	// PWD as the shell would have set it on a cd: the path as spelled, not
 	// as the kernel resolves it.
-	var env []string
-	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "PWD=") {
-			env = append(env, kv)
-		}
-	}
-	execReplace(shell, nil, append(env, "PWD="+dir))
+	execReplace(shell, nil, envWith("PWD", dir))
 }
 
 // ---------------------------------------------------------------------------

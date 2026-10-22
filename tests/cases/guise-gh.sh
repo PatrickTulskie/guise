@@ -37,6 +37,15 @@ expect_eq "GUISE_IDENTITY still overrides the directory" \
   "$(cd "$HOME/agentic-code/agent-one" && GUISE_IDENTITY=agent-two "$HOME/.local/bin/guise-gh" echo-token)" \
   "github_pat_two"
 
+# gh is a Go program and reads the first GH_TOKEN in its environment, so an
+# inherited one has to be replaced, not shadowed. printenv shows which entry
+# the child actually got: the first on BSD, every one on GNU.
+mkdir -p "$SB/printenv-gh"
+ln -s "$(command -v printenv)" "$SB/printenv-gh/gh"
+expect_eq "guise-gh replaces an inherited GH_TOKEN rather than adding a second" \
+  "$(cd "$HOME/elsewhere/agent-two" && GH_TOKEN=inherited PATH="$SB/printenv-gh:$PATH" \
+      "$HOME/.local/bin/guise-gh" GH_TOKEN)" "github_pat_two"
+
 # gh falls back to its stored login when GH_TOKEN is empty, so an unreadable
 # token has to stop guise-gh before gh runs at all.
 rm "$HOME/.config/guise/keys/agent-two.token"

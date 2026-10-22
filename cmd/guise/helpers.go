@@ -152,5 +152,5 @@ func cmdGh(args []string) {
 	if token == "" {
 		dieAs("guise-gh", "guise-token returned no token -- refusing to run gh as the logged-in user")
 	}
-	execReplace("gh", args, append(os.Environ(), "GH_TOKEN="+token))
+	execReplace("gh", args, envWith("GH_TOKEN", token))
 }
