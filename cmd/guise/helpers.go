@@ -134,9 +134,11 @@ func cmdCredential(args []string) {
 		// store/erase: tokens are ephemeral, nothing to persist.
 		return
 	}
+	// Resolve first: git reads whatever reached stdout before it looks at the
+	// exit status, and a bare password= would be tried as a credential.
+	token := tokenFor(identity)
 	fmt.Println("username=x-access-token")
-	fmt.Print("password=")
-	helperToken(identity)
+	fmt.Println("password=" + token)
 }
 
 // Identity is inferred from the current directory, overridable with
