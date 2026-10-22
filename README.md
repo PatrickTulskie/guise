@@ -20,6 +20,10 @@ guise setup
 ```
 
 `make install` builds a single binary with Go and puts it in `~/.local/bin`.
+If the shell then can't find `guise`, that directory isn't on your `PATH` yet:
+run `./bin/guise setup` from the checkout instead, and setup tells you the
+line to add.
+
 No Go? Every [release](https://github.com/PatrickTulskie/guise/releases) ships
 one per platform: unpack it, put `guise` on your `PATH`, and run `guise setup`.
 

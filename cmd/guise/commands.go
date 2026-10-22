@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -635,9 +638,22 @@ func cmdUse(args []string) {
 	if shell == "" {
 		shell = "/bin/sh"
 	}
+	// Git Bash spells $SHELL as /usr/bin/bash, a path only its own tools
+	// resolve; the bare name is on PATH either way.
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath(shell); err != nil {
+			shell = path.Base(shell)
+		}
+	}
 	// PWD as the shell would have set it on a cd: the path as spelled, not
 	// as the kernel resolves it.
-	execReplace(shell, nil, append(os.Environ(), "PWD="+dir))
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "PWD=") {
+			env = append(env, kv)
+		}
+	}
+	execReplace(shell, nil, append(env, "PWD="+dir))
 }
 
 // ---------------------------------------------------------------------------
