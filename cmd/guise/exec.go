@@ -8,6 +8,19 @@ import (
 	"strings"
 )
 
+// The environment with key set to value and nothing else changed. Appending
+// to os.Environ() would leave the inherited entry in place, and a Go program
+// reads the first one it finds.
+func envWith(key, value string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, key+"=") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, key+"="+value)
+}
+
 func have(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
