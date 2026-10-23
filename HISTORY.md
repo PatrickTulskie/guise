@@ -1,3 +1,18 @@
+## 0.7.0
+
+### Added
+
+* Every GitHub release ships a build per platform -- macOS, Linux and Windows, amd64 and arm64 -- with a checksum file (#48)
+
+### Changed
+
+* guise is one Go binary instead of a bash script, so it behaves the same on macOS, Linux, Git Bash and WSL; `make install` builds it, and the helpers and hooks it installs are `sh` shims that call back into it (#47)
+* `jq` and `openssl` are no longer needed; building from source needs Go 1.24 (#47)
+
+### Fixed
+
+* `guise-credential` resolves the token before answering git, so a failed read fails the push instead of handing git an empty password (#47)
+
 ## 0.6.1
 
 ### Fixed
