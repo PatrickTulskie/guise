@@ -21,6 +21,12 @@ expect "second identity got its own key file" test -f "$HOME/.config/guise/keys/
 expect_eq "doctor passes with file store" "$?" "0"
 FAKE_STAT_GNU=1 "$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor reads app-key permissions with GNU stat semantics" "$?" "0"
+# A key or token saved on Windows ends its lines in CRLF.
+openssl genrsa 2048 2>/dev/null | sed 's/$/\r/' > "$SB/crlf.pem"
+run_setup --store file --name crlf --pem "$SB/crlf.pem" >/dev/null 2>&1
+expect_eq "a CRLF PEM sets up" "$?" "0"
+t=$("$HOME/.local/bin/guise-token" crlf)
+expect_eq "and mints" "${t:0:4}" "ghs_"
 "$GUISE" uninstall --yes >/dev/null 2>&1
 expect "uninstall keeps key files" test -f "$keyfile"
 expect "uninstall removes config file" test ! -e "$HOME/.config/guise/config"

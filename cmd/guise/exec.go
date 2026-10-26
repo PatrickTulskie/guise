@@ -27,7 +27,9 @@ func have(name string) bool {
 }
 
 // stdout with trailing newlines dropped, the way $(...) hands it back.
-func chomp(s string) string { return strings.TrimRight(s, "\n") }
+// A file saved on Windows ends its lines in CRLF, and a stray \r left on a
+// token or on a PEM's END line breaks it.
+func chomp(s string) string { return strings.TrimRight(s, "\r\n") }
 
 // Runs a command with nothing attached to stdin and its stderr discarded.
 func output(name string, args ...string) (string, error) {
