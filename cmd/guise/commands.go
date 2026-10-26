@@ -693,6 +693,10 @@ func cmdRename(args []string) {
 	if exists(dst) {
 		die(dst + " already exists -- move it aside first")
 	}
+	// Its clones would ride along out of their own identity's scope.
+	if nested, ok := identityNestedIn(old); ok {
+		die("identity '" + nested + "' lives inside " + src + " -- move it out with 'guise basedir' first")
+	}
 
 	// Every file moves before the config changes, so a failed move leaves the
 	// old name whole rather than config pointing at paths that aren't there.
