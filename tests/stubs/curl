@@ -4,6 +4,9 @@
 # --config (a file, or - for stdin); one anywhere in argv is the leak this
 # stub is here to catch, whatever the URL.
 set -euo pipefail
+# jq.exe writes CRLF on Windows unless told not to, and a stored value has to
+# come back byte for byte.
+case "$(uname -s)" in MINGW*|MSYS*) jq() { command jq -b "$@"; } ;; esac
 
 url="" hdr="" config="" prev=""
 for a in "$@"; do

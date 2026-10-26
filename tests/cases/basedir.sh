@@ -2,7 +2,7 @@
 echo "workspace directory:"
 new_sandbox
 run_setup --store file --pem "$SB/key.pem" >/dev/null 2>&1
-expect_eq "basedir prints the shared workspace" "$(agent basedir)" "$HOME/agentic-code"
+expect_eq "basedir prints the shared workspace" "$(agent basedir)" "$(native "$HOME/agentic-code")"
 git init -q "$HOME/agentic-code/$APP_IDENT/someclone"
 
 agent basedir "$HOME/src" >/dev/null 2>&1
@@ -120,9 +120,9 @@ expect_eq "--name records an override" "$(cfg identity.platform.basedir)" "$HOME
 expect "the named identity moves" test -d "$HOME/work/platform/theirclone"
 expect "and the others stay where they are" test -d "$HOME/src/$APP_IDENT/someclone"
 expect_eq "the shared setting is untouched" "$(cfg core.basedir)" "$HOME/src"
-expect_eq "basedir --name reports the override" "$(agent basedir --name platform)" "$HOME/work"
+expect_eq "basedir --name reports the override" "$(agent basedir --name platform)" "$(native "$HOME/work")"
 expect_eq "and falls back to the shared one for anyone else" \
-  "$(agent basedir --name $APP_IDENT)" "$HOME/src"
+  "$(agent basedir --name $APP_IDENT)" "$(native "$HOME/src")"
 expect_eq "the override wins in git, under the new root" \
   "$(git -C "$HOME/work/platform/theirclone" config --get user.email)" \
   "3333+test-agent[bot]@users.noreply.github.com"

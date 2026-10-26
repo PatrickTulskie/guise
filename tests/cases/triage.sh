@@ -13,6 +13,7 @@ echo \$# > "$SB/harness/$1.argc"
 i=0; for a; do i=\$((i+1)); printf '%s' "\$a" > "$SB/harness/$1.arg\$i"; done
 EOF
   chmod +x "$SB/harness/$1"
+  stub_exe "$SB/harness/$1"
 }
 fake_harness claude
 fake_harness opencode
@@ -26,11 +27,11 @@ trepo="$HOME/agentic-code/$APP_IDENT/broken"
 git init -q "$trepo"
 prompt=$(cd "$trepo" && agent triage --print)
 expect "the prompt names the identity owning where triage started" \
-  grep -qF "$trepo, identity '$APP_IDENT''s directory" <<<"$prompt"
+  grep -qF "$(native "$trepo"), identity '$APP_IDENT''s directory" <<<"$prompt"
 expect "and points the agent at the source it is running" \
-  grep -qxF "     $ROOT/cmd/guise" <<<"$prompt"
+  grep -qxF "     $(native "$ROOT/cmd/guise")" <<<"$prompt"
 expect "and at the docs that ship with it" \
-  grep -qxF "     $ROOT/docs/troubleshooting.md" <<<"$prompt"
+  grep -qxF "     $(native "$ROOT/docs/troubleshooting.md")" <<<"$prompt"
 expect_eq "with no terminal, a bare triage prints the prompt rather than launching" \
   "$(cd "$trepo" && PATH="$SB/harness:$PATH" agent triage)" "$prompt"
 expect "and starts nothing" test ! -e "$SB/harness/claude.argc"

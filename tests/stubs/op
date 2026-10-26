@@ -5,6 +5,9 @@
 # with no such directory holds nothing. Every call's argv goes to
 # $OP_ARGV_LOG, so a test can prove a secret never passed through it.
 set -euo pipefail
+# jq.exe writes CRLF on Windows unless told not to, and a stored value has to
+# come back byte for byte.
+case "$(uname -s)" in MINGW*|MSYS*) jq() { command jq -b "$@"; } ;; esac
 
 root="${OP_FAKE_DIR:?OP_FAKE_DIR must be set}"
 [[ -z "${OP_ARGV_LOG:-}" ]] || printf '%s\n' "$*" >> "$OP_ARGV_LOG"

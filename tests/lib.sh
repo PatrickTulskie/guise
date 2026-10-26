@@ -56,6 +56,9 @@ new_sandbox() { # [home directory name]
   openssl genrsa -out "$SB/key.pem" 2048 2>/dev/null
 }
 
+# A stand-in script a native guise has to start: on Windows it needs an .exe.
+stub_exe() { if [[ -n "${STUB_EXE:-}" ]]; then cp "$STUB_EXE" "$1.exe"; fi; }
+
 # No --coauthor: the hook's fallback to global user.name/email is under test.
 run_setup() {
   "$GUISE" setup --owner patricktulskie --app-id 1111 \
@@ -85,6 +88,8 @@ cfg_all() {
 }
 # And the other way round, for a path the suite wrote and git will read back.
 git_path() { if command -v cygpath >/dev/null; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
+# A path as guise prints it: on Windows a native program spells it D:\...
+native() { if [[ -n "$EXE" ]]; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null; }
 # Git Bash mounts NTFS noacl: chmod is a no-op and every file reads 644.

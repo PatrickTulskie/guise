@@ -45,6 +45,7 @@ expect_eq "GUISE_IDENTITY still overrides the directory" \
 mkdir -p "$SB/printenv-gh"
 printf '#!%s GH_TOKEN\n' "$(command -v printenv)" > "$SB/printenv-gh/gh"
 chmod 755 "$SB/printenv-gh/gh"
+stub_exe "$SB/printenv-gh/gh"
 expect_eq "guise-gh replaces an inherited GH_TOKEN rather than adding a second" \
   "$(cd "$HOME/elsewhere/agent-two" && GH_TOKEN=inherited PATH="$SB/printenv-gh:$PATH" \
       "$HOME/.local/bin/guise-gh")" "github_pat_two"
