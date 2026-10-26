@@ -694,43 +694,44 @@ func cmdRename(args []string) {
 		die(dst + " already exists -- move it aside first")
 	}
 
-	cfgRenameSection("identity."+old, "identity."+newName)
+	// Every file moves before the config changes, so a failed move leaves the
+	// old name whole rather than config pointing at paths that aren't there.
+	var moves moveLog
+	moved := map[string]string{}
 
 	// Key material is named after the identity too; keep the two in step.
 	for _, key := range []string{"keyfile", "tokenfile"} {
-		f, ok := cfgPath("identity." + newName + "." + key)
+		f, ok := cfgPath("identity." + old + "." + key)
 		if !ok || !isFile(f) {
 			continue
 		}
-		moved := filepath.Join(filepath.Dir(f), newName+filepath.Ext(f))
-		if err := os.Rename(f, moved); err != nil {
-			die("could not move " + f + " to " + moved)
-		}
-		cfgSet("identity."+newName+"."+key, gitPath(moved))
+		moved[key] = filepath.Join(filepath.Dir(f), newName+filepath.Ext(f))
+		moves.move(f, moved[key])
 	}
 
 	// The signing key is a pair, and the extension rule above would turn
 	// <old>.signing.pub into <new>.pub, so it moves separately.
-	if signingEnabled(newName) {
-		f := signingKey(newName)
+	if signingEnabled(old) {
+		f := signingKey(old)
 		if isFile(f) {
-			moved := filepath.Join(keysDir, newName+".signing")
-			if err := os.Rename(f, moved); err != nil {
-				die("could not move " + f + " to " + moved)
-			}
+			moved["signingkey"] = filepath.Join(keysDir, newName+".signing")
+			moves.move(f, moved["signingkey"])
 			if isFile(f + ".pub") {
-				if err := os.Rename(f+".pub", moved+".pub"); err != nil {
-					die("could not move " + f + ".pub")
-				}
+				moves.move(f+".pub", moved["signingkey"]+".pub")
 			}
-			cfgSet("identity."+newName+".signingkey", gitPath(moved))
 		}
 	}
 
-	if isDir(src) {
-		if err := os.Rename(src, dst); err != nil {
-			die("could not move " + src + " to " + dst)
-		}
+	hadDir := isDir(src)
+	if hadDir {
+		moves.move(src, dst)
+	}
+
+	cfgRenameSection("identity."+old, "identity."+newName)
+	for key, f := range moved {
+		cfgSet("identity."+newName+"."+key, gitPath(f))
+	}
+	if hadDir {
 		say("moved " + src + " -> " + dst + " (reopen anything you had open in there)")
 	} else {
 		mkdirAll(dst, 0o755)

@@ -167,6 +167,17 @@ expect_eq "--sign is refused on an app identity" "$?" "1"
 expect "and refuses before touching the PEM" test -f "$SB/key.pem"
 
 echo "signing survives rename:"
+# A file already where the signing key would land fails the rename after the
+# token has moved, which has to put the token back and leave config alone.
+keys="$HOME/.config/guise/keys"
+echo "someone else's" > "$keys/bot-renamed.signing"
+agent rename "$USER_IDENT" bot-renamed >/dev/null 2>&1
+expect_eq "rename refuses to overwrite a key file" "$?" "1"
+expect_eq "which it leaves as it was" "$(cat "$keys/bot-renamed.signing")" "someone else's"
+expect "the token file moved back" test -f "$keys/$USER_IDENT.token" -a ! -e "$keys/bot-renamed.token"
+expect_eq "and config still names the old identity" \
+  "$(cfg identity.$USER_IDENT.tokenfile)" "$keys/$USER_IDENT.token"
+rm "$keys/bot-renamed.signing"
 agent rename "$USER_IDENT" bot-renamed >/dev/null 2>&1
 expect_eq "rename exits 0" "$?" "0"
 expect_eq "signingkey follows the rename" \
