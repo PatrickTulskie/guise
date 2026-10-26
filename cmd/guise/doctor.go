@@ -651,6 +651,9 @@ func cmdDoctor(args []string) {
 		}
 	}
 	requireConfig()
+	if only != "" && !identityExists(only) {
+		die("identity '" + only + "' not in config (have: " + identityList() + ")")
+	}
 
 	say("doctor:")
 	check("dependencies present (gh git curl, ssh-keygen if signing, op-cache if used)",

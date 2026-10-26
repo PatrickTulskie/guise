@@ -170,6 +170,10 @@ expect "the failure names the installation reachability check" \
   grep -q "FAIL  installation reaches at least one repository" "$SB/doctor.out"
 "$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor passes again once the installation has a repo" "$?" "0"
+agent doctor --name nonesuch > "$SB/doctor.out" 2>&1
+expect_eq "doctor refuses an unknown identity" "$?" "1"
+expect "before running a single check, naming the ones there are" \
+  sh -c "! grep -q 'ok\|FAIL' '$SB/doctor.out' && grep -q '(have: ' '$SB/doctor.out'"
 
 # A guise-gh from before it checked the token puts guise-token's failure in an
 # assignment prefix, where exec discards it and gh runs as the human. Doctor
