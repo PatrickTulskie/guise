@@ -46,17 +46,22 @@ expect "a trailing slash on basedir still selects the current identity" \
 
 # A basedir of / puts identity directories at the root, so this one clone
 # lands outside the sandbox by definition. Keep the destination unpredictable
-# and take it away again.
-root_dest=$(mktemp -d /tmp/guise-root.XXXXXX)
-root_repo=${root_dest##*/}
-# clone refuses an existing destination, even an empty one.
-rmdir "$root_dest"
-git init -q --bare "$SB/origins/owner/$root_repo.git"
-git config -f "$HOME/.config/guise/config" --rename-section identity.platform identity.tmp
-git config -f "$HOME/.config/guise/config" core.basedir /
-root_cwd=$(mktemp -d /tmp/guise-root.XXXXXX)
-( cd "$root_cwd" && agent clone "owner/$root_repo" ) >/dev/null 2>&1
-expect "a root basedir treats an absolute current directory as contained" \
-  test -d "$root_dest/.git"
-rm -rf "$root_cwd" "$root_dest"
+# and take it away again. On Windows / is Git's install directory and /tmp sits
+# under the profile, so no identity named tmp can own it.
+if [[ -n "$EXE" ]]; then
+  skip "a root basedir treats an absolute current directory as contained (no POSIX root on Windows)"
+else
+  root_dest=$(mktemp -d /tmp/guise-root.XXXXXX)
+  root_repo=${root_dest##*/}
+  # clone refuses an existing destination, even an empty one.
+  rmdir "$root_dest"
+  git init -q --bare "$SB/origins/owner/$root_repo.git"
+  git config -f "$HOME/.config/guise/config" --rename-section identity.platform identity.tmp
+  git config -f "$HOME/.config/guise/config" core.basedir /
+  root_cwd=$(mktemp -d /tmp/guise-root.XXXXXX)
+  ( cd "$root_cwd" && agent clone "owner/$root_repo" ) >/dev/null 2>&1
+  expect "a root basedir treats an absolute current directory as contained" \
+    test -d "$root_dest/.git"
+  rm -rf "$root_cwd" "$root_dest"
+fi
 
