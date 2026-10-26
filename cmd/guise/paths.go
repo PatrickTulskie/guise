@@ -206,6 +206,22 @@ func trimTrailingSep(d string) string {
 	return d
 }
 
+// A workspace root as config holds it: absolute, because it becomes an
+// includeIf gitdir, and cleaned, so /a/../b is stored as /b. A filesystem
+// root would put identity directories at the top of the disk and have doctor
+// walk all of it.
+func workspacePath(p string) string {
+	p = expandTilde(p)
+	if !filepath.IsAbs(p) {
+		die("'" + p + "' must be an absolute path (it becomes an includeIf gitdir)")
+	}
+	p = filepath.Clean(p)
+	if filepath.Dir(p) == p {
+		die("'" + p + "' is a filesystem root -- pick a directory under it")
+	}
+	return p
+}
+
 // Renames that stand or fall together: when one fails, the ones before it are
 // put back, newest first, and the run dies with nothing moved. A destination
 // that already exists is a failure, never something to overwrite.
