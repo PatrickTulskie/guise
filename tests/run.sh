@@ -29,6 +29,15 @@ elif [[ ! -x "$GUISE" ]]; then
   echo "no go toolchain on PATH and nothing built at $GUISE" >&2; exit 2
 fi
 
+# A native guise on Windows starts only real executables, so every stub gets
+# an .exe beside it that runs the script; lib.sh's stub_exe does the same for
+# a stand-in a case writes itself.
+if [[ -n "$exe" ]]; then
+  export STUB_EXE="$(dirname "$GUISE")/stubexe.exe"
+  go build -o "$STUB_EXE" "$HERE/stubexe" || exit 2
+  for s in "$HERE"/stubs/*; do [[ "$s" == *.exe ]] || cp "$STUB_EXE" "$s.exe"; done
+fi
+
 JOBS=${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}
 OUT=$(mktemp -d); export OUT
 cd "$HERE/cases"

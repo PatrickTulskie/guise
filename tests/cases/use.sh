@@ -12,6 +12,7 @@ printf '%s\n' "\$PWD" > "$SB/use.pwd"
 printf '%s\n' "\${GUISE_IDENTITY:-}" > "$SB/use.identity"
 EOF
 chmod +x "$SB/recording-shell"
+stub_exe "$SB/recording-shell"
 
 SHELL="$SB/recording-shell" "$GUISE" use platform </dev/null >/dev/null 2>&1
 expect_eq "use lands in the named identity's directory" \
@@ -46,7 +47,7 @@ expect_fail "use refuses an unknown identity" agent use nonesuch
 # The shell hook: `use --emit-shell` prints the cd, the sourced function runs it
 # in the shell you are already in. Everything else falls through to the script.
 expect_eq "--emit-shell prints just the cd, shell-quoted" \
-  "$(agent use platform --emit-shell)" "cd '$HOME/agentic-code/platform'"
+  "$(agent use platform --emit-shell)" "cd '$(native "$HOME/agentic-code/platform")'"
 expect_eq "sourcing the hook makes use cd the running bash" \
   "$(PATH="$HOME/.local/bin:$PATH" bash -c \
       'cd "$HOME"; . "$HOME/.config/guise/hook.sh"; guise use platform; printf %s "$PWD"')" \
@@ -72,7 +73,7 @@ fi
 # eval that checks the result can run under any bash -- a mangled quote is a
 # syntax error in every one of them.
 quoted_base="$HOME/pat's ünïcode guise"
-git config -f "$HOME/.config/guise/config" core.basedir "$quoted_base"
+git config -f "$HOME/.config/guise/config" core.basedir "$(git_path "$quoted_base")"
 emitted=$(agent use platform --emit-shell)
 expect_eq "a quote in the path survives the eval the hook does" \
   "$(cd "$HOME" && eval "$emitted" 2>/dev/null; printf %s "$PWD")" \

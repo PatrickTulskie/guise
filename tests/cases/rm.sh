@@ -47,7 +47,7 @@ expect "and so do the clones" test -d "$user_dir/someclone"
 expect_eq "which are no longer in any identity's scope" \
   "$(git -C "$user_dir/someclone" config --get user.email)" "human@example.com"
 agent doctor > "$SB/rm.doctor" 2>&1
-expect "doctor still finds them" grep -q "$user_dir/someclone" "$SB/rm.doctor"
+expect "doctor still finds them" grep -qF "$(native "$user_dir/someclone")" "$SB/rm.doctor"
 user_dir="$HOME/agentic-code/$USER_IDENT"
 git init -q "$app_dir/repo"
 expect_eq "the other identity still applies in its directory" \
@@ -62,9 +62,9 @@ git -C "$user_dir/unpushed" commit -q --allow-empty -m unpushed
 agent rm "$USER_IDENT" --force > "$SB/rm.out" 2>&1
 expect_eq "rm --force exits 0" "$?" "0"
 expect "naming the clone whose work it deleted unpushed" \
-  grep -q "^  $user_dir/unpushed\$" "$SB/rm.out"
+  grep -qxF "  $(native "$user_dir/unpushed")" "$SB/rm.out"
 expect "and not the one that was pushed" \
-  test "$(grep -c "$user_dir/pushed" "$SB/rm.out")" = 0
+  test "$(grep -cF "$(native "$user_dir/pushed")" "$SB/rm.out")" = 0
 expect "--force takes the token" test ! -e "$keys/$USER_IDENT.token"
 expect "both halves of the signing key" \
   test ! -e "$keys/$USER_IDENT.signing" -a ! -e "$keys/$USER_IDENT.signing.pub"

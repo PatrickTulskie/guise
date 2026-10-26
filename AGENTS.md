@@ -105,6 +105,13 @@ Within a case, run `setup` or `doctor` once into a file and assert on that
 several times, rather than once per assertion. The pty helpers (`in_pty`,
 `have_pty`) live in `lib.sh` too.
 
+On Windows the binary is native and cannot start a script, so `run.sh` puts an
+`.exe` beside every stub that runs it (`tests/stubexe`); a case that writes its
+own stand-in for something guise starts calls `stub_exe` on it. guise prints
+`D:\...` paths there, so compare its output against `native "$path"`, and hand
+a path to it on stdin, or in an argument with an apostrophe, as `git_path` --
+Git Bash rewrites neither.
+
 The stubs stand in for the outside world, all driven by environment variables
 rather than recorded fixtures:
 
