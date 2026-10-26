@@ -231,7 +231,8 @@ func cmdSetup(args []string) {
 			secretItem = s.opItem
 			secretAccount = opAccountFor(s.name)
 		default:
-			if identityKind(probe) == "user" && cfgHas("identity."+probe+".login") {
+			if probeLogin, ok := cfgGet("identity." + probe + ".login"); ok && identityKind(probe) == "user" &&
+				(s.login == "" || lower(probeLogin) == lower(s.login)) {
 				tokenOwner = probe
 			} else if s.login != "" {
 				tokenOwner, _ = findIdentityByLogin(s.login)
