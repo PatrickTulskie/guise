@@ -175,8 +175,8 @@ func renderIdentityConf(name string) {
 		if !isFile(key) || !isFile(key+".pub") {
 			die("identity '" + name + "' signs commits but its key is gone from " + key + " -- re-run 'guise setup --sign'")
 		}
-		signing = signingOnBlock(gitPath(allowedSigners(name)))
-		signingkey = "\n\tsigningkey = " + gitPath(key)
+		signing = signingOnBlock(gitConfigQuote(gitPath(allowedSigners(name))))
+		signingkey = "\n\tsigningkey = " + gitConfigQuote(gitPath(key))
 		// namespaces="git" stops this key vouching for anything but commits
 		// and tags, which is all it is ever asked to sign.
 		writeFile(allowedSigners(name), gitEmail(name)+" namespaces=\"git\" "+pubkeyBody(key+".pub")+"\n", 0o644)
@@ -195,7 +195,7 @@ func renderIdentityConf(name string) {
 	// which rejects the \' a shell-quoted apostrophe carries.
 	helper := "!" + shellQuote(gitPath(filepath.Join(binDir, "guise-credential"))) + " " + name
 	tmpl = strings.ReplaceAll(tmpl, "{{CREDENTIAL_HELPER}}", gitConfigQuote(helper))
-	tmpl = strings.ReplaceAll(tmpl, "{{DISPATCH_DIR}}", gitPath(dispatchDir))
+	tmpl = strings.ReplaceAll(tmpl, "{{DISPATCH_DIR}}", gitConfigQuote(gitPath(dispatchDir)))
 	writeFile(filepath.Join(renderDir, name+".conf"), tmpl, 0o644)
 }
 
