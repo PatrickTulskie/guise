@@ -7,9 +7,11 @@ echo "guided setup:"
 # kind, app-exists, owner, app id, where the key is, pem, browser pause, store,
 # name, workspace, go
 wizard() { "$GUISE" setup --wizard; }
+# Typed answers are never rewritten the way Git Bash rewrites argv, so a path
+# typed at a prompt is spelled the way a native guise reads it.
 
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\ny\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\ny\n' "$(git_path "$SB/key.pem")" \
   | wizard >/dev/null 2>&1
 expect_eq "a guided app setup exits 0" "$?" "0"
 # The whole design claim: the wizard only fills in flags, so it has to land the
@@ -37,14 +39,14 @@ expect_eq "unless asked to, which is what enter does" "$(cfg core.defaultidentit
 # A name and a workspace typed at the prompts, rather than derived.
 new_sandbox
 printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\nchosen\n%s\ny\n' \
-  "$SB/key.pem" "$HOME/elsewhere" | wizard >/dev/null 2>&1
+  "$(git_path "$SB/key.pem")" "$(git_path "$HOME/elsewhere")" | wizard >/dev/null 2>&1
 expect "an answered name becomes the identity" test -d "$HOME/elsewhere/chosen"
 expect_eq "and an answered workspace becomes the basedir" "$(cfg core.basedir)" "$HOME/elsewhere"
 
 # Declining at the summary has to leave no trace -- the whole point of asking
 # before doing anything.
 new_sandbox
-printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\nn\n' "$SB/key.pem" \
+printf 'app\ny\npatricktulskie\n1111\n\n%s\nok\nfile\n\n\nn\n' "$(git_path "$SB/key.pem")" \
   | wizard >/dev/null 2>&1
 expect_eq "declining at the summary fails" "$?" "1"
 expect "and writes no config" test ! -e "$HOME/.config/guise/config"
@@ -54,7 +56,7 @@ expect "and leaves the PEM alone" test -f "$SB/key.pem"
 # a non-numeric app id, and a path with no key at it. A menu also takes the
 # number of its choice.
 printf 'maybe\n2\ny\npatricktulskie\nnotanumber\n1111\n\n/nonesuch.pem\n%s\nok\nfile\n\n\ny\n' \
-  "$SB/key.pem" | wizard >/dev/null 2>&1
+  "$(git_path "$SB/key.pem")" | wizard >/dev/null 2>&1
 expect_eq "a bad choice, app id, and PEM path are all re-asked" "$?" "0"
 expect_eq "and the run still completes correctly" "$(cfg identity.$APP_IDENT.installationid)" "2222"
 
