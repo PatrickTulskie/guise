@@ -349,6 +349,9 @@ new shells** — right after setup, either open one or `source ~/.zshrc`. Until
 then, and in any shell that doesn't load the hook, `use` opens a subshell in the
 directory instead and you leave it with `exit`.
 
+Don't want it? Delete those lines. `guise update` only refreshes the hook where
+it finds it, so it stays gone; `guise setup` adds it back.
+
 Nothing is exported. The directory is what carries the identity — git picks it
 up through `includeIf`, `guise-gh` by reading `$PWD` — so there's no stale
 variable to follow you back out of the tree. `uninstall` removes the rc lines and

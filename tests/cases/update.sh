@@ -87,6 +87,12 @@ expect "the installed binary is replaced by the one being run" \
 snap_up=$(snapshot)
 agent update >/dev/null 2>&1
 expect_eq "a second update changes nothing" "$(snapshot)" "$snap_up"
+# Deleting the sourced line is the only way to turn the hook down.
+expect "the shell hook is still sourced from the rc" grep -qF '# >>> guise >>>' "$HOME/.zshrc"
+printf 'alias ll="ls -l"\n' > "$HOME/.zshrc"
+agent update > "$SB/update.out" 2>&1
+expect_eq "update leaves a shell hook the user removed out of the rc" "$(cat "$HOME/.zshrc")" 'alias ll="ls -l"'
+expect "and says so" grep -q "left the shell hook out of your shell rc" "$SB/update.out"
 OP_FAKE_FORBID=1 agent doctor >/dev/null 2>&1
 expect_eq "doctor still passes after an update" "$?" "0"
 

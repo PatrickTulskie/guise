@@ -111,8 +111,7 @@ func shellBlock() string {
 }
 
 func installShellHook() {
-	mkdirAll(configDir, 0o755)
-	writeFile(shellHookPath, shellHook, 0o644)
+	writeShellHook()
 	rc, ok := shellRc()
 	if !ok {
 		shell := os.Getenv("SHELL")
@@ -125,6 +124,23 @@ func installShellHook() {
 	// A no-op when the line is already there and current, so re-running
 	// setup never stacks up copies.
 	ensureMarkedBlock(rc, shellBlock())
+}
+
+// What update does instead: the rc line is only refreshed where it already
+// is, since deleting it is how someone turns the hook down.
+func refreshShellHook() bool {
+	writeShellHook()
+	rc, ok := shellRc()
+	if !ok || !isFile(rc) || !hasMarkers(rc) {
+		return false
+	}
+	ensureMarkedBlock(rc, shellBlock())
+	return true
+}
+
+func writeShellHook() {
+	mkdirAll(configDir, 0o755)
+	writeFile(shellHookPath, shellHook, 0o644)
 }
 
 // Uninstall can run under a different shell than setup did, so clear every

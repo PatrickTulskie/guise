@@ -250,8 +250,12 @@ func cmdUpdate(args []string) {
 
 	installBinaries()
 	installHook()
-	installShellHook()
-	say("reinstalled " + strings.Join(helpers, " ") + ", the commit hook, the hook dispatcher, and the shell hook")
+	if refreshShellHook() {
+		say("reinstalled " + strings.Join(helpers, " ") + ", the commit hook, the hook dispatcher, and the shell hook")
+	} else {
+		say("reinstalled " + strings.Join(helpers, " ") + ", the commit hook, and the hook dispatcher")
+		say("left the shell hook out of your shell rc, where it isn't now -- 'guise setup' puts it back")
+	}
 
 	// Every identity, not just the default: a bare `setup` re-renders only
 	// the one it ran for, which leaves the others on an old template.
