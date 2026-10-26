@@ -151,7 +151,8 @@ func jsonArray(s string) []any {
 	return a
 }
 
-// jq -r: a string bare, a number as written, null as "null".
+// jq -r for the scalars guise reads: a string bare, a number as written, null
+// as "null". An object or array is never one of them, so it reads as "".
 func jsonString(v any) string {
 	switch t := v.(type) {
 	case nil:
@@ -165,8 +166,6 @@ func jsonString(v any) string {
 			return "true"
 		}
 		return "false"
-	default:
-		b, _ := json.Marshal(t)
-		return string(b)
 	}
+	return ""
 }
