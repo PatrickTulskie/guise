@@ -451,17 +451,19 @@ func cmdBasedir(args []string) {
 		mkdirAll(filepath.Dir(m.dst), 0o755)
 		done.move(m.src, m.dst)
 	}
-	for _, m := range done {
-		say("moved " + displayPath(m[0]) + " -> " + displayPath(m[1]) + " (reopen anything you had open in there)")
-	}
 
 	switch {
 	case clear:
-		cfgUnset("identity." + name + ".basedir")
+		if cfgHas("identity." + name + ".basedir") {
+			done.cfg("--unset", "identity."+name+".basedir")
+		}
 	case name != "":
-		cfgSet("identity."+name+".basedir", gitPath(path))
+		done.cfg("identity."+name+".basedir", gitPath(path))
 	default:
-		cfgSet("core.basedir", gitPath(path))
+		done.cfg("core.basedir", gitPath(path))
+	}
+	for _, m := range done.moves {
+		say("moved " + displayPath(m[0]) + " -> " + displayPath(m[1]) + " (reopen anything you had open in there)")
 	}
 
 	// Only the includeIf paths name the workspace; the rendered confs do not,
@@ -723,9 +725,9 @@ func cmdRename(args []string) {
 		moves.move(src, dst)
 	}
 
-	cfgRenameSection("identity."+old, "identity."+newName)
+	moves.cfg("--rename-section", "identity."+old, "identity."+newName)
 	for key, f := range moved {
-		cfgSet("identity."+newName+"."+key, gitPath(f))
+		moves.cfg("identity."+newName+"."+key, gitPath(f))
 	}
 	if hadDir {
 		say("moved " + src + " -> " + dst + " (reopen anything you had open in there)")

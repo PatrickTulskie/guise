@@ -222,10 +222,15 @@ func workspacePath(p string) string {
 	return p
 }
 
-// Renames that stand or fall together: when one fails, the ones before it are
-// put back, newest first, and the run dies with nothing moved. A destination
-// that already exists is a failure, never something to overwrite.
-type moveLog [][2]string
+// Renames that stand or fall together, and the config writes that record
+// them: when either fails, the config goes back to how it was before the
+// first write, the renames are put back newest first, and the run dies with
+// nothing changed. A destination that already exists is a failure, never
+// something to overwrite.
+type moveLog struct {
+	moves  [][2]string
+	config []byte
+}
 
 func (l *moveLog) move(src, dst string) {
 	if exists(dst) {
@@ -234,12 +239,29 @@ func (l *moveLog) move(src, dst string) {
 	if err := os.Rename(src, dst); err != nil {
 		l.fail("could not move " + src + " to " + dst + ": " + err.Error())
 	}
-	*l = append(*l, [2]string{src, dst})
+	l.moves = append(l.moves, [2]string{src, dst})
 }
 
-func (l moveLog) fail(msg string) {
-	for i := len(l) - 1; i >= 0; i-- {
-		_ = os.Rename(l[i][1], l[i][0])
+func (l *moveLog) cfg(args ...string) {
+	if l.config == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			l.fail("cannot read " + configFile)
+		}
+		l.config = data
+	}
+	if err := cfgGit(args...); err != nil {
+		l.fail("could not write " + configFile)
+	}
+}
+
+func (l *moveLog) fail(msg string) {
+	if l.config != nil {
+		_ = os.WriteFile(configFile, l.config, 0o600)
+		cfgInvalidate()
+	}
+	for i := len(l.moves) - 1; i >= 0; i-- {
+		_ = os.Rename(l.moves[i][1], l.moves[i][0])
 	}
 	die(msg + " (nothing changed)")
 }
