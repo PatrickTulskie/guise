@@ -12,3 +12,12 @@ agent doctor > "$SB/stranded.out" 2>&1
 expect "and says nothing once it is gone" \
   grep -q "^  ok    no clones stranded" "$SB/stranded.out"
 
+# No depth limit: a clone any distance under the root is just as unscoped.
+git init -q "$HOME/agentic-code/old/team/deep/repo"
+git init -q "$HOME/agentic-code/old/team/deep/repo/vendor/inner"
+git init -q "$HOME/agentic-code/$APP_IDENT/a/b/c/scoped"
+agent doctor > "$SB/stranded.out" 2>&1
+expect "doctor finds a stray clone deep under the workspace" \
+  grep -q "$HOME/agentic-code/old/team/deep/repo " "$SB/stranded.out"
+expect_fail "but not what sits inside it" grep -q "/vendor/inner" "$SB/stranded.out"
+expect_fail "nor anything inside an identity directory" grep -q "/a/b/c/scoped" "$SB/stranded.out"

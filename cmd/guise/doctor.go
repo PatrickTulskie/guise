@@ -549,34 +549,54 @@ func reposUnder(root string, depth int) []string {
 	return repos
 }
 
+// Every repo under root that no identity directory holds. The walk stops at
+// an identity directory, where everything is wired, and at a repo root, since
+// what sits inside a clone is that clone's own business. Symlinks are not
+// followed.
+func strayReposUnder(root string) []string {
+	var repos []string
+	var walk func(dir string)
+	walk = func(dir string) {
+		if _, owned := identityOwning(dir); owned {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			// A submodule's or worktree's .git is a file, and either is still
+			// a repo, so this matches on the name rather than the type.
+			if e.Name() == ".git" {
+				repos = append(repos, dir)
+				return
+			}
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				walk(filepath.Join(dir, e.Name()))
+			}
+		}
+	}
+	walk(root)
+	return repos
+}
+
 // A repo sitting in a workspace root but outside every identity directory
 // gets none of the wiring, so it commits as the human -- silently, which is
 // the whole problem. Usually the leftovers of a workspace that moved without
-// its clones. Depth 3 covers <root>/<identity>/<repo>/.git, so a stray one at
-// <root>/<repo>/.git is inside the same walk.
+// its clones.
 func strandedClones() []string {
-	type scan struct {
-		depth int
-		root  string
-	}
-	var scans []scan
-	for _, r := range basedirs() {
-		scans = append(scans, scan{3, r})
-	}
+	roots := basedirs()
 	// Plus the directories `rm` left clones in: an identity with a workspace
 	// of its own takes the only record of that root with it.
 	for _, r := range cfgGetAll("core.strandeddir") {
-		scans = append(scans, scan{2, filepath.FromSlash(r)})
+		roots = append(roots, filepath.FromSlash(r))
 	}
 	var found []string
-	for _, s := range scans {
-		if s.root == "" || !isDir(s.root) {
-			continue
-		}
-		for _, repo := range reposUnder(s.root, s.depth) {
-			if _, owned := identityOwning(repo); !owned {
-				found = append(found, repo)
-			}
+	for _, r := range roots {
+		if r != "" && isDir(r) {
+			found = append(found, strayReposUnder(r)...)
 		}
 	}
 	return sortUnique(found)
