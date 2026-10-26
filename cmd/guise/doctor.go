@@ -449,6 +449,18 @@ func resolveCmd(name string) string {
 	if os.Getenv("BASH_FUNC_"+name+"%%") != "" || os.Getenv("BASH_FUNC_"+name+"()") != "" {
 		return "function"
 	}
+	// LookPath on Windows matches only PATHEXT names, and the shims have no
+	// extension; sh finds them by name, so this does too.
+	if runtime.GOOS == "windows" {
+		for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+			for _, n := range []string{name, name + ".exe"} {
+				if p := filepath.Join(dir, n); isFile(p) {
+					return p
+				}
+			}
+		}
+		return ""
+	}
 	p, err := exec.LookPath(name)
 	if err != nil {
 		return ""
