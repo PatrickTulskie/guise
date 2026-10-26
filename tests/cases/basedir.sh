@@ -98,6 +98,12 @@ else
   skip "basedir puts back a partial move (no enforced modes here)"
 fi
 
+: > "$HOME/.config/guise/config.lock"
+expect_fail "basedir fails when it cannot write the config" agent basedir "$HOME/locked"
+rm "$HOME/.config/guise/config.lock"
+expect "and puts the clones back" test -d "$HOME/src/$APP_IDENT/someclone"
+expect "leaving nothing in the new root" test ! -e "$HOME/locked/$APP_IDENT"
+
 expect_fail "basedir refuses a relative path" agent basedir relative/path
 mkdir -p "$HOME/occupied/$APP_IDENT"
 expect_fail "basedir refuses an occupied destination" agent basedir "$HOME/occupied"

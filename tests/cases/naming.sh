@@ -39,6 +39,18 @@ expect_eq "doctor passes once the default is repointed" "$?" "0"
 echo "rename:"
 "$GUISE" default test-agent >/dev/null 2>&1
 mkdir -p "$HOME/agentic-code/test-agent/someclone"
+# A config git cannot lock fails the rename after every file has moved, which
+# has to put them back: clones under the new name would commit as the human.
+: > "$HOME/.config/guise/config.lock"
+"$GUISE" rename test-agent renamed >/dev/null 2>&1
+expect_eq "rename fails when it cannot write the config" "$?" "1"
+rm "$HOME/.config/guise/config.lock"
+expect "the clones are back under the old name" test -d "$HOME/agentic-code/test-agent/someclone"
+expect "and so is the key" test -f "$HOME/.config/guise/keys/test-agent.pem"
+git init -q "$HOME/agentic-code/test-agent/someclone"
+expect_eq "still scoped to the identity" \
+  "$(git -C "$HOME/agentic-code/test-agent/someclone" config --get user.email)" \
+  "3333+test-agent[bot]@users.noreply.github.com"
 "$GUISE" rename test-agent renamed >/dev/null 2>&1
 expect_eq "rename exits 0" "$?" "0"
 expect "clones move with the identity" test -d "$HOME/agentic-code/renamed/someclone"
