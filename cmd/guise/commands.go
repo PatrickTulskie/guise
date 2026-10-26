@@ -640,8 +640,13 @@ func cmdUse(args []string) {
 		}
 	}
 	// PWD as the shell would have set it on a cd: the path as spelled, not
-	// as the kernel resolves it.
-	execReplace(shell, nil, envWith("PWD", dir))
+	// as the kernel resolves it. Git Bash spells it /c/..., which only it can
+	// work out, so there the shell is left to find it.
+	env := envWith("PWD", dir)
+	if runtime.GOOS == "windows" {
+		env = envWithout("PWD")
+	}
+	execReplace(shell, nil, env)
 }
 
 // ---------------------------------------------------------------------------

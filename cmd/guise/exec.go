@@ -12,13 +12,17 @@ import (
 // to os.Environ() would leave the inherited entry in place, and a Go program
 // reads the first one it finds.
 func envWith(key, value string) []string {
+	return append(envWithout(key), key+"="+value)
+}
+
+func envWithout(key string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, key+"=") {
 			env = append(env, kv)
 		}
 	}
-	return append(env, key+"="+value)
+	return env
 }
 
 func have(name string) bool {
