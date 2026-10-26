@@ -185,12 +185,12 @@ func cmdSetup(args []string) {
 
 	requireDeps(s.kind)
 
-	if s.base == "" {
-		if b, ok := cfgPath("core.basedir"); ok {
-			s.base = b
-		} else {
-			s.base = defaultBasedir
-		}
+	if s.base != "" {
+		s.base = workspacePath(s.base)
+	} else if b, ok := cfgPath("core.basedir"); ok {
+		s.base = b
+	} else {
+		s.base = defaultBasedir
 	}
 
 	// Optional: when unset, the hook falls back to global user.name/email at

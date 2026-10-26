@@ -80,6 +80,24 @@ expect_fail "basedir refuses to move a directory another identity lives inside" 
 expect "leaving both where they were" test -d "$HOME/src/$APP_IDENT/nested/zeta/zclone"
 agent basedir --unset --name zeta >/dev/null 2>&1
 
+agent basedir "$HOME/elsewhere/../src" >/dev/null 2>&1
+expect_eq "a path is recorded cleaned" "$(cfg core.basedir)" "$HOME/src"
+expect_fail "basedir refuses a filesystem root" agent basedir /
+expect_fail "and so does setup" run_setup --store file --name rooted --pem "$SB/key.pem" --base-dir /
+
+# Renaming a directory rewrites its .. entry, so an unwritable one cannot move.
+# The plan moves test-agent first and zeta second; test-agent has to come back.
+if perms_enforced; then
+  chmod 555 "$HOME/src/zeta"
+  expect_fail "basedir fails when one of its moves does" agent basedir "$HOME/partial"
+  chmod 755 "$HOME/src/zeta"
+  expect "and puts back the moves it already made" test -d "$HOME/src/$APP_IDENT/someclone"
+  expect "leaving nothing in the new root" test ! -e "$HOME/partial/$APP_IDENT"
+  expect_eq "with the setting untouched" "$(cfg core.basedir)" "$HOME/src"
+else
+  skip "basedir puts back a partial move (no enforced modes here)"
+fi
+
 expect_fail "basedir refuses a relative path" agent basedir relative/path
 mkdir -p "$HOME/occupied/$APP_IDENT"
 expect_fail "basedir refuses an occupied destination" agent basedir "$HOME/occupied"

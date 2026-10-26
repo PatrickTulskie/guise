@@ -376,16 +376,7 @@ func cmdBasedir(args []string) {
 	}
 
 	if path != "" {
-		switch {
-		case path == "~":
-			path = home
-		case strings.HasPrefix(path, "~/"):
-			path = filepath.Join(home, path[2:])
-		case filepath.IsAbs(path):
-		default:
-			die("basedir: '" + path + "' must be an absolute path (it becomes an includeIf gitdir)")
-		}
-		path = trimTrailingSep(path)
+		path = workspacePath(path)
 	}
 
 	// Which identities move, and where to. A per-identity change moves that
@@ -452,15 +443,16 @@ func cmdBasedir(args []string) {
 		}
 	}
 
+	var done moveLog
 	for _, m := range moves {
 		if !isDir(m.src) {
 			continue
 		}
 		mkdirAll(filepath.Dir(m.dst), 0o755)
-		if err := os.Rename(m.src, m.dst); err != nil {
-			die("could not move " + m.src + " to " + m.dst)
-		}
-		say("moved " + displayPath(m.src) + " -> " + displayPath(m.dst) + " (reopen anything you had open in there)")
+		done.move(m.src, m.dst)
+	}
+	for _, m := range done {
+		say("moved " + displayPath(m[0]) + " -> " + displayPath(m[1]) + " (reopen anything you had open in there)")
 	}
 
 	switch {

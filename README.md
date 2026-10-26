@@ -511,7 +511,8 @@ Moving it **takes the clones with it.** That is the whole reason this is a
 subcommand and not a config edit: a clone left behind under the old path falls
 out of `includeIf` scope and quietly starts committing as *you*, which is the
 one failure this tool exists to prevent. If the destination is already
-occupied, nothing moves and nothing changes — clear it yourself and re-run.
+occupied, nothing moves and nothing changes — clear it yourself and re-run. A
+move that fails partway puts back the ones already made, so the same holds.
 `guise doctor` also warns about any repo it finds in a workspace but outside an
 identity directory, which is what a hand-moved clone looks like.
 
