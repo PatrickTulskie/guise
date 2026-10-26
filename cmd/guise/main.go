@@ -11,7 +11,7 @@ import (
 	"os"
 )
 
-const version = "0.7.0"
+const version = "0.7.1"
 
 func main() {
 	initEnv()

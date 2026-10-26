@@ -1,3 +1,14 @@
+## 0.7.1
+
+### Fixed
+
+* A `$HOME` with a space or an apostrophe in it no longer breaks the credential helper, or every git command in scope with it (#59)
+* `rename` moves an identity's files before its config, refuses one whose directory holds another identity, and puts everything back when a step fails (#60)
+* `basedir` and `setup --base-dir` clean the path and refuse a filesystem root, and `basedir` puts back a move that fails partway (#60)
+* `doctor` reports a stray clone at any depth under the workspace, not just three levels down (#61)
+* On Windows, a key or token saved with CRLF line endings still parses (#62)
+* On Windows, `doctor` finds the installed helpers on `PATH`, and `use` opens its shell with Git Bash's own `$PWD` (#62)
+
 ## 0.7.0
 
 ### Added
