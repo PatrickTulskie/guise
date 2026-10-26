@@ -62,3 +62,8 @@ expect_eq "rename refuses a name already in use" "$?" "1"
 "$GUISE" rename nonesuch whatever >/dev/null 2>&1
 expect_eq "rename refuses an unknown identity" "$?" "1"
 
+agent basedir "$HOME/agentic-code/renamed/nested" --name claimed >/dev/null 2>&1
+"$GUISE" rename renamed outer >/dev/null 2>&1
+expect_eq "rename refuses to move a directory another identity lives inside" "$?" "1"
+expect "leaving that identity where its scope is" test -d "$HOME/agentic-code/renamed/nested/claimed"
+expect_eq "and the outer one under its old name" "$(cfg identity.renamed.slug)" "test-agent"
