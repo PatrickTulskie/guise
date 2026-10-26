@@ -23,11 +23,11 @@ expect_eq() {
 expect_fail() { local desc="$1"; shift; if "$@" >/dev/null 2>&1; then bad "$desc"; else ok "$desc"; fi }
 skip() { printf '  skip  %s\n' "$1"; }
 
-new_sandbox() {
+new_sandbox() { # [home directory name]
   # pwd rather than what mktemp printed: on Git Bash that may be a Windows
   # spelling, and every path below is compared as a string.
   SB=$(cd "$(mktemp -d)" && pwd)
-  export HOME="$SB/home"
+  export HOME="$SB/${1:-home}"
   mkdir -p "$HOME"
   export XDG_CACHE_HOME="$HOME/.cache"
   export OP_FAKE_DIR="$SB/op"; mkdir -p "$OP_FAKE_DIR"

@@ -189,7 +189,10 @@ func renderIdentityConf(name string) {
 	tmpl = strings.ReplaceAll(tmpl, "{{SIGNINGKEY}}", signingkey)
 	tmpl = strings.ReplaceAll(tmpl, "{{SIGNING}}", signing)
 	tmpl = strings.ReplaceAll(tmpl, "{{NAME}}", name)
-	tmpl = strings.ReplaceAll(tmpl, "{{BIN_DIR}}", gitPath(binDir))
+	// A shell snippet, so a path with a space in it reaches the shell as one
+	// word. Without the !, git reads anything not starting with / as a helper
+	// name and runs git credential-<it>.
+	tmpl = strings.ReplaceAll(tmpl, "{{CREDENTIAL_HELPER}}", "!"+shellQuote(gitPath(filepath.Join(binDir, "guise-credential"))))
 	tmpl = strings.ReplaceAll(tmpl, "{{DISPATCH_DIR}}", gitPath(dispatchDir))
 	writeFile(filepath.Join(renderDir, name+".conf"), tmpl, 0o644)
 }
