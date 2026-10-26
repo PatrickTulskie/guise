@@ -206,6 +206,28 @@ func trimTrailingSep(d string) string {
 	return d
 }
 
+// Renames that stand or fall together: when one fails, the ones before it are
+// put back, newest first, and the run dies with nothing moved. A destination
+// that already exists is a failure, never something to overwrite.
+type moveLog [][2]string
+
+func (l *moveLog) move(src, dst string) {
+	if exists(dst) {
+		l.fail(dst + " already exists -- move it aside first")
+	}
+	if err := os.Rename(src, dst); err != nil {
+		l.fail("could not move " + src + " to " + dst + ": " + err.Error())
+	}
+	*l = append(*l, [2]string{src, dst})
+}
+
+func (l moveLog) fail(msg string) {
+	for i := len(l) - 1; i >= 0; i-- {
+		_ = os.Rename(l[i][1], l[i][0])
+	}
+	die(msg + " (nothing changed)")
+}
+
 // Where an identity's clones live. Per-identity first, so a work identity can
 // sit under ~/work while a personal one sits under ~/src; core.basedir is the
 // shared fallback. Always answers without a trailing separator.
