@@ -72,3 +72,14 @@ expect_eq "both identities in the owned gitconfig" \
 "$GUISE" doctor >/dev/null 2>&1
 expect_eq "doctor passes with both kinds present" "$?" "0"
 
+
+# --- setup --login when the default is another account -------------------------
+echo "setup --login:"
+new_sandbox
+new_token_file "$SB/pat1.txt"
+run_setup_user --store file --token-file "$SB/pat1.txt" >/dev/null 2>&1
+printf 'github_pat_two\n' > "$SB/pat2.txt"
+FAKE_LOGIN=agent-two FAKE_USER_ID=4002 run_setup_user --store file --token-file "$SB/pat2.txt" >/dev/null 2>&1
+FAKE_LOGIN=agent-two FAKE_USER_ID=4002 run_setup_user --login agent-two >/dev/null 2>&1
+expect_eq "re-run with --login reuses that account's token, not the default's" \
+  "$("$HOME/.local/bin/guise-token" agent-two)" "github_pat_two"
