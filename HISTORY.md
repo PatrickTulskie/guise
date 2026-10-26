@@ -1,3 +1,15 @@
+## 0.7.2
+
+### Changed
+
+* `update` leaves a shell hook you deleted from your shell rc deleted; `setup` still adds it (#69)
+
+### Fixed
+
+* A `$HOME` with a `#` or `;` in it no longer truncates the hooks path, signing key or allowed signers file git reads from an identity's config, which failed setup and every signed commit (#65)
+* `doctor --name` refuses an identity that isn't in config, instead of failing every check with hints that point at the wrong fix (#67)
+* `setup --login` reuses the stored token of the account it names, not the default identity's (#68)
+
 ## 0.7.1
 
 ### Fixed
