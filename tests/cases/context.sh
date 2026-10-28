@@ -61,7 +61,7 @@ agent doctor > "$SB/doctor.out" 2>&1
 expect "doctor reports the hook" grep -q "ok.*Codex session hook" "$SB/doctor.out"
 
 # A hook from an install at another path is replaced, not joined by a second.
-jq '(.hooks.SessionStart[].hooks[] | select(.command | contains("guise'"'"' context")) | .command) = "/old/guise context"' "$hooks" > "$SB/old.json"
+jq '(.hooks.SessionStart[].hooks[] | select(.command | test("[/'"'"']guise(\\.exe)?'"'"'? context$")) | .command) = "/old/guise context"' "$hooks" > "$SB/old.json"
 mv "$SB/old.json" "$hooks"
 agent doctor > "$SB/doctor.out" 2>&1
 expect "doctor flags a hook that runs another guise" grep -q "warn.*Codex session hook" "$SB/doctor.out"
