@@ -40,15 +40,16 @@ expect_eq "the shared one still answers for the rest" "$(hook "$HOME/agentic-cod
 # A machine with Codex on it, and hooks of its own already in the file.
 mkdir "$HOME/.codex"
 cat > "$hooks" <<'JSON'
-{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo hi && echo <there>"}]}],"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}
+{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo hi && echo <there>"}]},{"hooks":[{"type":"command","command":"/opt/disguise context"}]}],"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}
 JSON
 agent update > "$SB/update.out" 2>&1
 expect "update writes the hook" grep -q "session hook" "$SB/update.out"
-ours() { jq -r '.hooks.SessionStart[].hooks[] | select(.command | endswith(" context")) | .command' "$hooks"; }
+ours() { jq -r '.hooks.SessionStart[].hooks[] | select(.command | test("[/'"'"']guise(\\.exe)?'"'"'? context$")) | .command' "$hooks"; }
 expect_eq "one SessionStart handler runs guise context" "$(ours | grep -c .)" "1"
 expect "naming the installed guise, not the one being run" grep -qF "$(git_path "$HOME/.local/bin/guise$EXE")" "$hooks"
 expect_eq "the user's SessionStart hook survived" "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$hooks")" 'echo hi && echo <there>'
 expect "written as it was, not as \\u0026\\u0026" grep -qF 'echo hi && echo <there>' "$hooks"
+expect "a command that merely ends in context is someone else's" grep -qF '/opt/disguise context' "$hooks"
 expect_eq "and the Stop hook with it" "$(jq -r '.hooks.Stop[0].hooks[0].command' "$hooks")" "say done"
 # Run what Codex runs: the command out of the file, with the hook's stdin.
 expect_eq "the command Codex runs prints the workspace rules" \
@@ -60,7 +61,7 @@ agent doctor > "$SB/doctor.out" 2>&1
 expect "doctor reports the hook" grep -q "ok.*Codex session hook" "$SB/doctor.out"
 
 # A hook from an install at another path is replaced, not joined by a second.
-jq '(.hooks.SessionStart[].hooks[] | select(.command | endswith(" context")) | .command) = "/old/guise context"' "$hooks" > "$SB/old.json"
+jq '(.hooks.SessionStart[].hooks[] | select(.command | contains("guise'"'"' context")) | .command) = "/old/guise context"' "$hooks" > "$SB/old.json"
 mv "$SB/old.json" "$hooks"
 agent doctor > "$SB/doctor.out" 2>&1
 expect "doctor flags a hook that runs another guise" grep -q "warn.*Codex session hook" "$SB/doctor.out"
@@ -78,13 +79,14 @@ expect_eq "and is left as it was" "$(cat "$hooks")" "{oops"
 # Uninstall takes guise's entry and nothing else; the file goes only when
 # that entry was all it held.
 cat > "$hooks" <<'JSON'
-{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo hi"}]}]}}
+{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"echo hi"}]},{"hooks":[{"type":"command","command":"/opt/disguise context"}]}]}}
 JSON
 agent update >/dev/null 2>&1
 agent uninstall -y > "$SB/uninstall.out" 2>&1
 expect "uninstall says it removed the hook" grep -q "session hook" "$SB/uninstall.out"
 expect_eq "guise's handler is gone" "$(ours | grep -c .)" "0"
 expect_eq "the user's stays" "$(jq -r '.hooks.SessionStart[0].hooks[0].command' "$hooks")" "echo hi"
+expect_eq "and so does the one that only sounds like ours" "$(jq -r '.hooks.SessionStart[1].hooks[0].command' "$hooks")" "/opt/disguise context"
 openssl genrsa -out "$SB/key2.pem" 2048 2>/dev/null
 run_setup --store file --pem "$SB/key2.pem" >/dev/null 2>&1
 echo '{}' > "$hooks"
