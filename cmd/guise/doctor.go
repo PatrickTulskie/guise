@@ -672,6 +672,10 @@ func cmdDoctor(args []string) {
 		"run 'guise update'", chkDispatcher())
 	note("shell hook sourced (lets 'guise use' cd this shell)",
 		"re-run 'guise setup', or source "+displayPath(shellHookPath)+" from your shell rc yourself", chkShellHook())
+	if haveCodex() {
+		note("Codex session hook in place (Codex never reads the workspace's AGENTS.md on its own)",
+			"run 'guise update', then trust the hook once with /hooks inside codex", chkCodexHook())
+	}
 	check("human identity untouched outside "+basedir(""),
 		"something overrode global config -- inspect ~/.gitconfig for stray edits", chkHumanUntouched())
 	// Walked once, not once per interpolation.

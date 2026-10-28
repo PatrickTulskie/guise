@@ -641,6 +641,9 @@ func cmdSetup(args []string) {
 	}
 	mkdirAll(identityDir(name), 0o755)
 	installAgentDocs(basedir(name))
+	// Last: a hooks.json that can't be parsed stops here, with everything
+	// else already in place.
+	codexHook := installCodexHook()
 
 	say("==> setup complete for identity '" + name + "'")
 	if wantSign {
@@ -648,6 +651,10 @@ func cmdSetup(args []string) {
 	}
 	say("    agent clones go in " + identityDir(name) + "/ (use 'guise clone <owner/repo>')")
 	say("    default identity: " + defaultIdentity())
+	if codexHook {
+		say("    Codex: a session hook in " + displayPath(codexHooksFile()) + " feeds it the workspace's AGENTS.md")
+		say("    -- trust it once with /hooks inside codex")
+	}
 	if rc, ok := shellRc(); ok {
 		say("    'guise use' cds this shell once " + displayPath(rc) + " is reloaded")
 		say("    -- open a new shell, or: . " + displayPath(rc))

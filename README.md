@@ -135,10 +135,12 @@ after the account, so commits under `~/agentic-code/<login>/` are authored by
 it, still with you as co-author. Helper binaries land in `~/.local/bin`, which
 has to be on `PATH` (setup says so, with the line to add, when it isn't), and
 setup drops an `AGENTS.md` (and a `CLAUDE.md` importing it) into
-`~/agentic-code/` telling harnesses to use `guise-gh` — harnesses that stack
-context files up the directory tree pick it up for every repo underneath; it
-never overwrites your edits. It finishes by running `doctor`, which verifies
-the whole chain.
+`~/agentic-code/` telling harnesses to use `guise-gh` — Claude Code, Cursor,
+OpenCode and Pi walk up the directory tree and pick it up for every repo
+underneath; it never overwrites your edits. Codex doesn't walk up, so when
+`~/.codex` exists setup also adds a session hook to `~/.codex/hooks.json` that
+hands Codex the same file (see [Codex](#codex)). It finishes by running
+`doctor`, which verifies the whole chain.
 
 Requires: `gh`, `git` and `curl`, plus `op` (1Password CLI 2.30 or newer,
 signed in) if you use `--store op` or `--store op-cache`, and `op-cache` itself
@@ -359,9 +361,32 @@ the hook.
 
 The only convention that matters: **agent clones live under the workspace
 directory, your own clones live anywhere else.** Inside that directory every git operation
-— from Claude Code, Cursor, or a plain terminal — uses the bot identity with no
-harness-specific configuration. Tell each harness one thing: use `guise-gh`
-instead of `gh` (a line in `CLAUDE.md` / Cursor rules).
+— from Claude Code, Cursor, Codex, or a plain terminal — uses the bot identity with no
+harness-specific configuration. The one thing a harness has to be told is to
+use `guise-gh` instead of `gh`, and the `AGENTS.md` setup drops at the top of
+the workspace says so.
+
+### Codex
+
+Claude Code, Cursor, OpenCode and Pi read instruction files from every
+directory above the one they start in, so the workspace `AGENTS.md` reaches
+them anywhere under it. Codex reads from the nearest git root down and never
+above it, which leaves that file out of every session — including one started
+in the identity directory itself, where there is no git root at all.
+
+So setup (and `update`) add a `SessionStart` hook to `~/.codex/hooks.json`
+when `~/.codex` exists, running `guise context`: it reads the session's working
+directory out of the hook's input, prints the workspace `AGENTS.md` when that
+directory is under one, and nothing otherwise. Codex adds the output to the
+session as developer context. Hooks you already have in that file stay as they
+are, and `uninstall` takes only guise's out.
+
+Codex runs a new hook only after you trust it, once per machine: open Codex,
+run `/hooks`, and accept it. `doctor` says whether the hook is in place.
+
+`guise context` is not Codex-specific — it takes the directory from the JSON
+any harness's session hook hands it, or the current directory when run by
+hand — so a harness that stops walking up some day gets the same treatment.
 
 ## Repositories with their own hooks
 
@@ -405,6 +430,7 @@ each repository its own path back.
 | `guise update` | reinstall helpers, hook, and rendered confs from this copy of guise |
 | `guise setup-hooks` | in a clone that pins its own `core.hooksPath`: run those hooks ahead of guise's instead of in place of it |
 | `guise token` | print the identity's token (debugging / harness use) |
+| `guise context` | print the workspace `AGENTS.md` for a directory under it; what the Codex session hook runs |
 | `guise default [name]` | show or change the identity used when none is named |
 | `guise rename <old> <new>` | rename an identity, its directory, and its key files |
 | `guise cp <identity> <new>` | a second workspace committing as the same account, without a second setup |

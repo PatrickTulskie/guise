@@ -452,8 +452,9 @@ guess here would take out lines you wrote.
 ## `gh` commands act as you, not the bot
 
 Plain `gh` uses your stored login. Use `guise-gh` — it injects a bot token via
-`GH_TOKEN`, which `gh` prefers over its own credentials. Put "use `guise-gh`
-instead of `gh`" in `CLAUDE.md` and Cursor rules.
+`GH_TOKEN`, which `gh` prefers over its own credentials. The `AGENTS.md` setup
+drops at the top of the workspace tells harnesses so; if Codex is the one
+reaching for `gh`, see [the next entry](#codex-reaches-for-gh-or-doesnt-know-about-guise).
 
 `guise-gh` never falls back to that login. If it can't get the identity's token
 it exits before `gh` runs, with `guise-token`'s error above its own; fix that
@@ -462,6 +463,30 @@ need a `guise update` to pick it up — `doctor` fails on "guise-gh refuses to
 run gh without the identity's token" until they get one, by running the
 installed copy against a missing config with a stand-in `gh` on `PATH` and
 checking that `gh` never ran.
+
+## Codex reaches for `gh`, or doesn't know about guise
+
+**Cause:** Codex reads `AGENTS.md` from the nearest git root down to the
+working directory and never above it, so the workspace `AGENTS.md` that every
+other harness finds by walking up is invisible to it — from inside a clone and
+from the identity directory alike. guise feeds it that file through a
+`SessionStart` hook in `~/.codex/hooks.json` instead, and Codex runs a hook
+only once you have trusted it.
+
+`guise doctor` says whether the hook is in place. If it warns, run `guise
+update`, which writes the hook when `~/.codex` exists. Then open Codex, run
+`/hooks`, and trust it — Codex prints a warning at startup for as long as it
+is waiting on that. Trust is tied to the hook's definition, so a changed
+`~/.local/bin` path asks for it again.
+
+To see what the hook hands Codex, run it the way Codex does, from anywhere:
+
+```bash
+printf '{"cwd":"%s"}' "$(guise basedir)/<identity>" | guise context
+```
+
+Nothing printed means that directory is under no workspace, which is also what
+a session started outside one gets.
 
 ## `guise-gh` isn't found, or runs the wrong thing
 

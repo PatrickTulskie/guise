@@ -55,6 +55,8 @@ func main() {
 		cmdList(args)
 	case "warm-cache":
 		cmdWarmCache(args)
+	case "context":
+		cmdContext(args)
 	case "version", "--version", "-v":
 		say("guise " + version)
 	case "help", "--help", "-h", "":
@@ -173,6 +175,9 @@ usage: guise <command> [flags]
   list       print every identity, its account, store, and workspace
   warm-cache read every op-cache-backed secret once, so the first agent of
              the session doesn't hit the 1Password prompt  [--name <identity>]
+  context    print the workspace's AGENTS.md for a directory under it, and
+             nothing otherwise; what the Codex session hook runs, with the
+             directory in the hook's JSON on stdin (else the current one)
   version    print the version of this copy of guise
 `
 }
