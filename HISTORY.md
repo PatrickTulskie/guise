@@ -1,3 +1,10 @@
+## 0.7.3
+
+### Added
+
+* Codex gets the workspace `AGENTS.md`: when `~/.codex` exists, `setup` and `update` add a `SessionStart` hook to `~/.codex/hooks.json` that hands it over, leaving your other hooks alone; trust it once with `/hooks` in Codex, and `doctor` says whether it's in place (#70)
+* `guise context` prints the workspace `AGENTS.md` for the directory a session hook hands it on stdin, or the current one, so any harness's hook can use it (#70)
+
 ## 0.7.2
 
 ### Changed
