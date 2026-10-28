@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -90,9 +91,17 @@ func codexHookGroup() map[string]any {
 	}
 }
 
+// Ours when the command is a program named guise run with the one argument
+// context, from whatever install path: a handler that merely contains the
+// word is someone else's.
 func isGuiseHook(h any) bool {
 	c, _ := jsonField(h, "command").(string)
-	return strings.HasSuffix(c, " context") && strings.Contains(c, "guise")
+	exe, ok := strings.CutSuffix(c, " context")
+	if !ok {
+		return false
+	}
+	base := path.Base(strings.Trim(exe, "'"))
+	return base == "guise" || base == "guise.exe"
 }
 
 // A group every handler of which is guise's. A hand edit that put another
