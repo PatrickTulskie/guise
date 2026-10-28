@@ -158,7 +158,8 @@ the repo needs a rebuild.
 
 `cmd/guise/` is the whole tool, one `package main` split by concern:
 `setup.go`, `wizard.go`, `doctor.go`, `commands.go`, `triage.go`, the helpers
-in `helpers.go` and the commit hook and dispatcher in `hook.go`. What `setup`
+in `helpers.go`, the commit hook and dispatcher in `hook.go`, and the Codex
+session hook with the `context` subcommand it runs in `context.go`. What `setup`
 writes to disk is in `assets.go`: `guise-token`, `guise-credential`, `guise-gh`,
 the commit hook and the one dispatcher every git hook name runs are **`sh`
 shims that call back into the installed binary** (`guise token`, `_credential`,

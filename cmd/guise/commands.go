@@ -54,6 +54,9 @@ func cmdUninstall(args []string) {
 	say("removed guise block from ~/.gitconfig")
 	removeShellHook()
 	say("removed guise block from your shell rc")
+	if removeCodexHook() {
+		say("removed guise's session hook from " + displayPath(codexHooksFile()))
+	}
 
 	for _, b := range append(append([]string{}, helpers...), exeName) {
 		_ = os.Remove(filepath.Join(binDir, b))
@@ -265,6 +268,9 @@ func cmdUpdate(args []string) {
 	regenOwnedGitconfig()
 	ensureIncludeBlock()
 	say(fmt.Sprintf("re-rendered %d identity conf(s) in %s", len(names), renderDir))
+	if installCodexHook() {
+		say("rewrote guise's session hook in " + displayPath(codexHooksFile()))
+	}
 	pathCallout()
 	say("")
 	say("config and stored secrets untouched -- run 'guise doctor' to verify the chain")

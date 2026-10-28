@@ -44,6 +44,8 @@ new_sandbox() { # [home directory name]
   unset FAKE_GH_LOGIN FAKE_TOKEN_EXPIRES 2>/dev/null || true
   export OP_FAKE_ACCOUNT=my.1password.com
   unset GUISE_IDENTITY GUISE_CONFIG GUISE_CO_AUTHOR 2>/dev/null || true
+  # Or setup would write the Codex session hook into a real Codex home.
+  unset CODEX_HOME 2>/dev/null || true
   # Either would send the --global writes below past the sandboxed $HOME.
   unset GIT_CONFIG_GLOBAL XDG_CONFIG_HOME 2>/dev/null || true
   # Pins which rc setup writes the shell-hook line into, so the suite asserts
